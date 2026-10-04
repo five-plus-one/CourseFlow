@@ -55,10 +55,13 @@ const KezhouMain = {
     },
 
     init() {
-        // 普通 iframe 不注入；但讨论区 iframe（groupweb）要注入，否则找不到发帖表单
+        // 普通 iframe 不注入；groupweb 讨论区 iframe 只做执行器（不建 UI）
         if (window !== window.top) {
             const h = location.hostname;
             if (!/groupweb\.(xuexitong|chaoxing)\.com/.test(h)) return;
+            // 内 iframe：只启动中继监听，不建 UI
+            try { if (window.__KEZHOU_DISCUSS__) window.__KEZHOU_DISCUSS__.startRelay(); } catch (e) { }
+            return;
         }
 
         ProviderManager.init();
@@ -79,6 +82,8 @@ const KezhouMain = {
 
         createKezhouButtons();
         syncKezhouPanel();
+        // 外窗口启动中继监听（收内 iframe 回传的结果）
+        try { if (window.__KEZHOU_DISCUSS__) window.__KEZHOU_DISCUSS__.startRelay(); } catch (e) { }
         this.lastChapterId = (adapter.getParams() || {}).chapterId || '';
         this.pageSig = location.pathname + '|' + this.lastChapterId;
         this.log(`就绪 · ${adapter.isDetailPage() ? '详情页' : '列表页'} · mode=${this.mode} · autoNext=${this.options.autoNext}`, 'o');

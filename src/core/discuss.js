@@ -1,12 +1,15 @@
 // ========== 课舟 自动讨论（发帖 + 点赞）==========
-// DOM 来源：research/diagnose-discuss.js 实测（2026-10-04）+ 用户提供的 mooc2-ans 发帖表单 HTML
-// 兼容两种页面：
-//   A. mooc2-ans 讨论页（input[name="title"] + UEditor 富文本 + .edit_btn 发布）
-//   B. 学习页侧栏（input#toplevelTextCommentTitle + textarea#toplevelTextCommentContent）
+// 架构：外窗口持 UI + AI 生成 + 计数，内 iframe（groupweb）做执行器
+// 通信：GM_setValue / GM_addValueChangeListener 跨 frame 共享，天然中继通道
+//   外窗口 → CMD_KEY 发指令 → 内 iframe 监听执行 → RESULT_KEY 回传结果
+// 无 iframe 时（学习页侧栏）直接本地执行，不走中继
 
 const KZDiscuss = {
     KEY_COUNT: 'kezhou-discuss-count',
     KEY_LOG: 'kezhou-discuss-log',
+    RELAY_CMD_KEY: 'kezhou-discuss-cmd',
+    RELAY_RESULT_KEY: 'kezhou-discuss-result',
+    _relayPending: null,   // { id, resolve }
 
     // ---- 计数 ----
     getCount(courseId) {
@@ -33,7 +36,81 @@ const KZDiscuss = {
         } catch (e) { }
     },
 
-    // ---- AI 批量生成讨论内容（一次调用生成 N 条）----
+    // ============ 中继协议 ============
+
+    /**
+     * 外窗口：发指令给内 iframe，等结果
+     * @returns {Promise<{ok, reason}>}
+     */
+    relayPost(title, content) {
+        return new Promise((resolve) => {
+            const cmdId = 'cmd_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
+            this._relayPending = { id: cmdId, resolve, ts: Date.now() };
+
+            try {
+                GM_setValue(this.RELAY_CMD_KEY, {
+                    id: cmdId,
+                    action: 'post',
+                    title,
+                    content,
+                    ts: Date.now(),
+                });
+            } catch (e) {
+                this._relayPending = null;
+                resolve({ ok: false, reason: '中继发送失败: ' + e.message });
+                return;
+            }
+
+            // 超时 30s
+            setTimeout(() => {
+                if (this._relayPending && this._relayPending.id === cmdId) {
+                    this._relayPending = null;
+                    resolve({ ok: false, reason: '中继超时（讨论区 iframe 未响应，可能未加载完）' });
+                }
+            }, 30000);
+        });
+    },
+
+    /**
+     * 启动中继监听
+     * - 在 groupweb iframe 里：监听指令并执行发帖
+     * - 在外窗口：监听结果并 resolve
+     */
+    startRelay() {
+        const isDiscussFrame = /groupweb\.(xuexitong|chaoxing)\.com/.test(location.hostname);
+
+        // 监听指令（只有讨论区 iframe 执行）
+        try {
+            GM_addValueChangeListener(this.RELAY_CMD_KEY, (name, oldVal, newVal) => {
+                if (!newVal || newVal.action !== 'post') return;
+                if (!isDiscussFrame) return; // 外窗口不执行，只发指令
+
+                // 内 iframe：执行发帖，回传结果
+                this.postTopicLocal(newVal.title, newVal.content).then(result => {
+                    try {
+                        GM_setValue(this.RELAY_RESULT_KEY, {
+                            id: newVal.id,
+                            ok: result.ok,
+                            reason: result.reason || '',
+                            ts: Date.now(),
+                        });
+                    } catch (e) { }
+                });
+            });
+        } catch (e) { }
+
+        // 监听结果（只有外窗口需要 resolve）
+        try {
+            GM_addValueChangeListener(this.RELAY_RESULT_KEY, (name, oldVal, newVal) => {
+                if (!newVal || !this._relayPending || this._relayPending.id !== newVal.id) return;
+                this._relayPending.resolve({ ok: newVal.ok, reason: newVal.reason });
+                this._relayPending = null;
+            });
+        } catch (e) { }
+    },
+
+    // ============ AI 批量生成 ============
+
     async generateTopics(count, courseName, chapterName) {
         const prompt =
             `你是一个大学生，正在学习《${courseName || '这门课程'}》` +
@@ -66,18 +143,13 @@ const KZDiscuss = {
         }
     },
 
-    // ---- 发帖表单查找（双页面兼容）----
+    // ============ 发帖表单查找 ============
 
-    /**
-     * 找到发帖表单元素
-     * 返回 { titleInput, setContent(, publishBtn, expandBtn, pageType }
-     * pageType: 'mooc2ans' | 'sidebar' | null
-     */
     _findForm() {
-        // ---- A. mooc2-ans 讨论页（.editContainer 结构）----
+        // ---- A. mooc2-ans 讨论页（.editContainer）----
         const editTitle = document.querySelector('.edit_title input[name="title"]')
             || document.querySelector('.edit_title input[type="text"]');
-        if (editTitle && editTitle.offsetParent !== null) {
+        if (editTitle) {
             const publishBtn = document.querySelector('.edit_btn .jb_btn')
                 || document.querySelector('.edit_btn a.jb_btn')
                 || document.querySelector('.edit_btn [class*="jb_btn"]');
@@ -85,9 +157,7 @@ const KZDiscuss = {
                 pageType: 'mooc2ans',
                 titleInput: editTitle,
                 publishBtn,
-                expandBtn: null,
                 setContent: (text) => {
-                    // UEditor：优先走 API，退化为直接写 iframe body
                     try {
                         const ue = window.UE && UE.instants && UE.instants['ueditorInstant0'];
                         if (ue && ue.setContent) {
@@ -102,7 +172,6 @@ const KZDiscuss = {
                             const d = holder.contentDocument || holder.contentWindow.document;
                             if (d && d.body) {
                                 d.body.innerHTML = text.replace(/\n/g, '<br>');
-                                // 触发 UEditor 感知内容变化
                                 try {
                                     const evt = d.createEvent('Event');
                                     evt.initEvent('input', true, true);
@@ -117,7 +186,7 @@ const KZDiscuss = {
             };
         }
 
-        // ---- B. 学习页侧栏（input#toplevelTextCommentTitle + textarea）----
+        // ---- B. 学习页侧栏 ----
         const sidebarTitle = document.querySelector('input#toplevelTextCommentTitle');
         const sidebarContent = document.querySelector('textarea#toplevelTextCommentContent');
         if (sidebarTitle) {
@@ -128,7 +197,6 @@ const KZDiscuss = {
                 titleInput: sidebarTitle,
                 contentInput: sidebarContent,
                 publishBtn,
-                expandBtn: document.querySelector('span.newTopic_bnt'),
                 setContent: (text) => {
                     if (!sidebarContent) return false;
                     sidebarContent.value = text;
@@ -142,72 +210,49 @@ const KZDiscuss = {
         return null;
     },
 
-    /** 展开发帖表单（如果需要） */
-    async _expandForm(form) {
-        if (form.expandBtn && form.expandBtn.offsetParent !== null) {
-            form.expandBtn.click();
-            await new Promise(r => setTimeout(r, 600));
-            return this._findForm(); // 重新获取
-        }
-        return form;
-    },
+    // ============ 本地发帖（内 iframe / 学习页侧栏用） ============
 
-    /** 发一条帖子 */
-    async postTopic(title, content) {
+    async postTopicLocal(title, content) {
         let form = this._findForm();
         if (!form) {
-            // 尝试点击「新建话题」按钮展开表单
-            const expandBtns = [
-                'span.newTopic_bnt',
-                '.newTopic_bnt',
-                '.edit_headTitle',
-                '[class*="newTopic"]',
-                '[class*="new-topic"]',
-                'button, a, div',
-            ];
-            for (const sel of expandBtns.slice(0, -1)) {
+            // 尝试展开
+            const expandSelectors = ['span.newTopic_bnt', '.newTopic_bnt', '.edit_headTitle', '[class*="newTopic"]'];
+            for (const sel of expandSelectors) {
                 const btn = document.querySelector(sel);
                 if (btn && btn.offsetParent !== null) {
-                    btn.click();
+                    try { btn.click(); } catch (e) { }
                     await new Promise(r => setTimeout(r, 1000));
                     form = this._findForm();
                     if (form) break;
                 }
             }
-            // 兜底：按文本找「新建话题」按钮
             if (!form) {
                 const all = Array.from(document.querySelectorAll('button, a, div, span'));
-                const btn = all.find(el => {
-                    const t = (el.textContent || '').trim();
-                    return t === '新建话题' && el.offsetParent !== null;
-                });
+                const btn = all.find(el => (el.textContent || '').trim() === '新建话题' && el.offsetParent !== null);
                 if (btn) {
-                    btn.click();
+                    try { btn.click(); } catch (e) { }
                     await new Promise(r => setTimeout(r, 1000));
                     form = this._findForm();
                 }
             }
         }
-        if (!form) return { ok: false, reason: '找不到发帖表单（请确认在讨论区页面）' };
+        if (!form) return { ok: false, reason: '找不到发帖表单' };
 
         // 填标题
-        const ti = form.titleInput;
-        if (ti) {
-            ti.value = title;
-            ti.dispatchEvent(new Event('input', { bubbles: true }));
-            ti.dispatchEvent(new Event('change', { bubbles: true }));
-            ti.dispatchEvent(new Event('blur', { bubbles: true }));
+        if (form.titleInput) {
+            form.titleInput.value = title;
+            form.titleInput.dispatchEvent(new Event('input', { bubbles: true }));
+            form.titleInput.dispatchEvent(new Event('change', { bubbles: true }));
+            form.titleInput.dispatchEvent(new Event('blur', { bubbles: true }));
         }
         await new Promise(r => setTimeout(r, 300));
 
         // 填内容
-        const contentOk = form.setContent(content);
-        if (!contentOk) return { ok: false, reason: '找不到内容输入区' };
+        if (!form.setContent(content)) return { ok: false, reason: '找不到内容输入区' };
         await new Promise(r => setTimeout(r, 500));
 
-        // 发布按钮（可能需要内容填入后才从 disable 变 enable）
+        // 发布
         if (!form.publishBtn) return { ok: false, reason: '找不到发布按钮' };
-        // 如果按钮是 disable 状态，等一下再试
         let btn = form.publishBtn;
         if (btn.className && btn.className.includes('disable')) {
             await new Promise(r => setTimeout(r, 500));
@@ -218,6 +263,26 @@ const KZDiscuss = {
 
         this._log({ action: 'post', title: title.slice(0, 20), page: form.pageType });
         return { ok: true };
+    },
+
+    /**
+     * 发一条帖子（自动选择本地/中继）
+     * 外窗口找不到本地表单 → 走中继让内 iframe 执行
+     */
+    async postTopic(title, content) {
+        // 先试本地表单
+        const form = this._findForm();
+        if (form) {
+            return this.postTopicLocal(title, content);
+        }
+
+        // 本地没表单 → 如果在外窗口，走中继
+        if (window === window.top) {
+            return this.relayPost(title, content);
+        }
+
+        // 内 iframe 也没表单 → 尝试本地展开后再试
+        return this.postTopicLocal(title, content);
     },
 
     /** 给帖子点赞（最新一条） */
@@ -235,7 +300,7 @@ const KZDiscuss = {
         return false;
     },
 
-    // ---- 主入口 ----
+    // ============ 主入口 ============
 
     async autoPost(opts) {
         const { courseId, courseName, chapterName, count = 2, maxY = 10, autoLike = true } = opts || {};
@@ -252,38 +317,6 @@ const KZDiscuss = {
         if (window.__KEZHOU_MAIN__) {
             window.__KEZHOU_MAIN__.log(`自动发帖：一次性生成 ${toPost} 条（已发 ${done}/${maxY}）`, 'i');
             window.__KEZHOU_MAIN__.say('AI 生成讨论中…', 'info');
-        }
-
-        // 先确认发帖表单存在，找不到就不浪费 AI 调用
-        let form = this._findForm();
-        if (!form) {
-            // 尝试多种方式展开表单
-            const expandSelectors = ['span.newTopic_bnt', '.newTopic_bnt', '.edit_headTitle', '[class*="newTopic"]'];
-            for (const sel of expandSelectors) {
-                const btn = document.querySelector(sel);
-                if (btn && btn.offsetParent !== null) {
-                    try { btn.click(); } catch (e) { }
-                    await new Promise(r => setTimeout(r, 1000));
-                    form = this._findForm();
-                    if (form) break;
-                }
-            }
-            if (!form) {
-                // 按文本找「新建话题」
-                const all = Array.from(document.querySelectorAll('button, a, div, span'));
-                const btn = all.find(el => (el.textContent || '').trim() === '新建话题' && el.offsetParent !== null);
-                if (btn) {
-                    try { btn.click(); } catch (e) { }
-                    await new Promise(r => setTimeout(r, 1000));
-                    form = this._findForm();
-                }
-            }
-        }
-        if (!form) {
-            if (window.__KEZHOU_MAIN__) {
-                window.__KEZHOU_MAIN__.log('找不到发帖表单，请先打开讨论区页面', 'e');
-            }
-            return 0;
         }
 
         // 一次 AI 调用生成全部内容

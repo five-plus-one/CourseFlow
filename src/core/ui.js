@@ -396,12 +396,7 @@ function createKezhouPanel() {
                 <option value="3">3 条</option>
             </select>
             <label>每门课最多发几条</label>
-            <select id="kz-discuss-max">
-                <option value="5">5 条</option>
-                <option value="10" selected>10 条</option>
-                <option value="15">15 条</option>
-                <option value="20">20 条</option>
-            </select>
+            <input id="kz-discuss-max" type="number" min="1" max="100" value="10" placeholder="1~100">
             <div class="kz-check"><input type="checkbox" id="kz-discuss-like"><span>发帖后自动点赞</span></div>
         </div>
     </div>
@@ -522,7 +517,7 @@ function createKezhouPanel() {
         // 讨论设置
         m.options.autoDiscuss = panel.querySelector('#kz-auto-discuss').checked;
         m.options.discussPerTrigger = parseInt(panel.querySelector('#kz-discuss-count').value) || 2;
-        m.options.discussMaxPerCourse = parseInt(panel.querySelector('#kz-discuss-max').value) || 10;
+        m.options.discussMaxPerCourse = Math.min(100, Math.max(1, parseInt(panel.querySelector('#kz-discuss-max').value) || 10));
         m.options.discussAutoLike = panel.querySelector('#kz-discuss-like').checked;
         try {
             GM_setValue('kezhou-mode', m.mode);
