@@ -20,12 +20,21 @@ const XuexitongAdapter = {
     shouldInitialize() {
         const h = location.hostname;
         const p = location.pathname;
+        // 讨论区 iframe（groupweb）也要注入，否则找不到发帖表单
+        if (/groupweb\.(xuexitong|chaoxing)\.com/.test(h)) return true;
         // 详情页 + 章节列表都注入（列表页只显示按钮，不做自动化）
         return /mooc[12](-ans)?\.(xuexitong|chaoxing)\.com/.test(h)
             && (/studentstudy|\/mycourse\/stu|fanyav3\/stu|\/base/.test(p));
     },
 
+    /** 是否是讨论区 iframe（groupweb）——轻量模式，只做发帖 */
+    isDiscussFrame() {
+        return /groupweb\.(xuexitong|chaoxing)\.com/.test(location.hostname);
+    },
+
     isDetailPage() {
+        // 讨论区 iframe 也算详情页（否则 tick 永远跳过）
+        if (this.isDiscussFrame()) return true;
         return /studentstudy/.test(location.pathname);
     },
 

@@ -55,7 +55,11 @@ const KezhouMain = {
     },
 
     init() {
-        if (window !== window.top) return;
+        // 普通 iframe 不注入；但讨论区 iframe（groupweb）要注入，否则找不到发帖表单
+        if (window !== window.top) {
+            const h = location.hostname;
+            if (!/groupweb\.(xuexitong|chaoxing)\.com/.test(h)) return;
+        }
 
         ProviderManager.init();
         try {

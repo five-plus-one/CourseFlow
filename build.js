@@ -55,6 +55,8 @@ function buildHeader(version) {
         '*://mooc1.chaoxing.com/*',
         '*://mooc2-ans.xuexitong.com/*',
         '*://mooc2-ans.chaoxing.com/*',
+        '*://groupweb.xuexitong.com/*',
+        '*://groupweb.chaoxing.com/*',
         '*://i.xuexitong.com/*',
         '*://i.chaoxing.com/*',
     ];

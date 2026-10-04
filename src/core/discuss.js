@@ -156,12 +156,36 @@ const KZDiscuss = {
     async postTopic(title, content) {
         let form = this._findForm();
         if (!form) {
-            // 尝试展开后再找
-            const tmpExpand = document.querySelector('span.newTopic_bnt, .newTopic_bnt');
-            if (tmpExpand && tmpExpand.offsetParent !== null) {
-                tmpExpand.click();
-                await new Promise(r => setTimeout(r, 800));
-                form = this._findForm();
+            // 尝试点击「新建话题」按钮展开表单
+            const expandBtns = [
+                'span.newTopic_bnt',
+                '.newTopic_bnt',
+                '.edit_headTitle',
+                '[class*="newTopic"]',
+                '[class*="new-topic"]',
+                'button, a, div',
+            ];
+            for (const sel of expandBtns.slice(0, -1)) {
+                const btn = document.querySelector(sel);
+                if (btn && btn.offsetParent !== null) {
+                    btn.click();
+                    await new Promise(r => setTimeout(r, 1000));
+                    form = this._findForm();
+                    if (form) break;
+                }
+            }
+            // 兜底：按文本找「新建话题」按钮
+            if (!form) {
+                const all = Array.from(document.querySelectorAll('button, a, div, span'));
+                const btn = all.find(el => {
+                    const t = (el.textContent || '').trim();
+                    return t === '新建话题' && el.offsetParent !== null;
+                });
+                if (btn) {
+                    btn.click();
+                    await new Promise(r => setTimeout(r, 1000));
+                    form = this._findForm();
+                }
             }
         }
         if (!form) return { ok: false, reason: '找不到发帖表单（请确认在讨论区页面）' };
@@ -233,12 +257,26 @@ const KZDiscuss = {
         // 先确认发帖表单存在，找不到就不浪费 AI 调用
         let form = this._findForm();
         if (!form) {
-            // 尝试展开
-            const expand = document.querySelector('span.newTopic_bnt, .newTopic_bnt, .editContainer');
-            if (expand && expand.offsetParent !== null) {
-                try { expand.click(); } catch (e) { }
-                await new Promise(r => setTimeout(r, 800));
-                form = this._findForm();
+            // 尝试多种方式展开表单
+            const expandSelectors = ['span.newTopic_bnt', '.newTopic_bnt', '.edit_headTitle', '[class*="newTopic"]'];
+            for (const sel of expandSelectors) {
+                const btn = document.querySelector(sel);
+                if (btn && btn.offsetParent !== null) {
+                    try { btn.click(); } catch (e) { }
+                    await new Promise(r => setTimeout(r, 1000));
+                    form = this._findForm();
+                    if (form) break;
+                }
+            }
+            if (!form) {
+                // 按文本找「新建话题」
+                const all = Array.from(document.querySelectorAll('button, a, div, span'));
+                const btn = all.find(el => (el.textContent || '').trim() === '新建话题' && el.offsetParent !== null);
+                if (btn) {
+                    try { btn.click(); } catch (e) { }
+                    await new Promise(r => setTimeout(r, 1000));
+                    form = this._findForm();
+                }
             }
         }
         if (!form) {
