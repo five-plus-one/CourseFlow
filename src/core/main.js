@@ -295,6 +295,7 @@ const KezhouMain = {
         if (Date.now() - (this._lastDiscuss || 0) < 30000) return;
         this._lastDiscuss = Date.now();
 
+        this._discussBusy = true;
         try {
             const adapter = window.__KEZHOU_ADAPTER__;
             const params = adapter ? adapter.getParams() : {};
@@ -318,6 +319,8 @@ const KezhouMain = {
             });
         } catch (e) {
             this.log('自动讨论异常: ' + e.message, 'e');
+        } finally {
+            this._discussBusy = false;
         }
     },
 
@@ -355,6 +358,12 @@ const KezhouMain = {
     },
 
     async onAllTasksDone(adapter) {
+        // 发帖进行中：等发完再继续（切知识点/跳节）
+        if (this._discussBusy) {
+            if (this.tickCount % 4 === 1) this.log('发帖进行中，等待完成…', 'i');
+            return;
+        }
+
         this.unbindVideo();
 
         const stepKey = (this.lastChapterId || '') + '|' + this._knowledgeStep;
