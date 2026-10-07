@@ -395,9 +395,9 @@ const KezhouMain = {
             if (Date.now() - (this._lastAutoNext || 0) < 10000) return;
             this._lastAutoNext = Date.now();
             this.log('全部任务点完成，autoNext → 下一节', 'o');
-            this.taskLocalDone = {};
+            // 注意：不归零 _knowledgeStep / taskLocalDone，清零只由页面变化守卫做
+            // 否则 nextChapter() 失败（末页/翻页慢）时会反复横跳知识点、任务点重做
             this.currentTask = null;
-            this._knowledgeStep = 0;
             this._seekedFor = null;
             this.lastRatio = 0;
             adapter.nextChapter();
