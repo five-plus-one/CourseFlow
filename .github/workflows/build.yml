@@ -34,12 +34,6 @@ jobs:
         id: ver
         run: echo "version=$(node -p "require('fs').readFileSync('src/core/config.js','utf8').match(/VERSION:\s*'([^']+)'/)[1]")" >> "$GITHUB_OUTPUT"
 
-      # 拷贝产物到 Pages 目录（同时放安装页）
-      - name: Prepare Pages
-        run: |
-          cp dist/courseflow.user.js .github/pages/
-          cp .github/pages/index.html .github/pages/index.html
-
       # 发 GitHub Release（tag = 版本号）
       - name: Create Release
         if: github.event_name == 'push'
