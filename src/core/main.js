@@ -181,6 +181,7 @@ const KezhouMain = {
             this.taskLocalDone = {};
             this.currentTask = null;
             this._knowledgeStep = 0;
+            this._quizSwitchTries = 0;
             this.unbindVideo();
         } else if (p.chapterId && this.lastChapterId && p.chapterId !== this.lastChapterId) {
             this.log(`章节变化: ${this.lastChapterId} → ${p.chapterId}，熔断旧任务`, 'i');
@@ -194,6 +195,7 @@ const KezhouMain = {
             this.taskLocalDone = {};
             this.currentTask = null;
             this._knowledgeStep = 0;
+            this._quizSwitchTries = 0;
             this.unbindVideo();
         }
 
@@ -584,11 +586,17 @@ const KezhouMain = {
                 return;
             }
 
+            // legacy：尝试切测验 Tab，最多 2 次，切不到就当无测验直接推进
             if (!this.quizDone) {
-                this.log('切换到「章节测验」Tab', 'i');
-                adapter.switchTab('quiz');
-                setFabState('running', '课舟 · 测验');
-                return;
+                this._quizSwitchTries = (this._quizSwitchTries || 0) + 1;
+                if (this._quizSwitchTries <= 2) {
+                    this.log('切换到「章节测验」Tab', 'i');
+                    adapter.switchTab('quiz');
+                    setFabState('running', '课舟 · 测验');
+                    return;
+                }
+                this.log('未检测到测验内容，跳过', 'i');
+                this.quizDone = true;
             }
 
             if (this.options.autoNext) {
