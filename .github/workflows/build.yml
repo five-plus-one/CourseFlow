@@ -34,22 +34,22 @@ jobs:
         id: ver
         run: echo "version=$(node -p "require('fs').readFileSync('src/core/config.js','utf8').match(/VERSION:\s*'([^']+)'/)[1]")" >> "$GITHUB_OUTPUT"
 
-      # 发 GitHub Release（tag = 版本号）
+      # 发 GitHub Release（tag = 版本号），先查远程是否已有该 tag
       - name: Create Release
         if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="v${{ steps.ver.outputs.version }}"
-          if ! git rev-parse "$TAG" >/dev/null 2>&1; then
+          if git ls-remote --tags origin "refs/tags/$TAG" | grep -q "$TAG"; then
+            echo "Tag $TAG already exists on remote, skip release"
+          else
             git tag "$TAG"
             git push origin "$TAG"
             gh release create "$TAG" \
               dist/courseflow.user.js \
               --title "课舟 v${{ steps.ver.outputs.version }}" \
               --notes "自动构建发布"
-          else
-            echo "Tag $TAG already exists, skip release"
           fi
 
   deploy:
