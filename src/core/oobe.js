@@ -46,8 +46,9 @@ const OOBE = {
                     <input id="kz-oobe-key" type="password" value="${cfg.apiKey || ''}"
                            placeholder="sk-..."
                            style="width:100%;padding:11px 12px;border:1px solid #d8dee8;border-radius:8px;font-size:13px;margin:6px 0 16px;box-sizing:border-box;">
-                    <div style="font-size:12px;color:#2166ad;margin-bottom:16px;">
-                        还没有 Key？<a href="https://api.ai.five-plus-one.com/console/token" target="_blank" style="color:#2166ad;font-weight:700;">免费注册 5+1 AI</a>
+                    <div style="font-size:12px;margin-bottom:16px;">
+                        <a href="https://api.ai.five-plus-one.com/console/token" target="_blank"
+                           style="color:#2166ad;font-weight:600;text-decoration:none;">点击获取访问凭证 →</a>
                     </div>
                     <div style="display:flex;gap:10px;">
                         <button id="kz-oobe-back" style="flex:1;padding:12px;background:#fff;color:#344054;border:1px solid #d8dee8;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">上一步</button>

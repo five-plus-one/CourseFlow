@@ -418,6 +418,10 @@ function createKezhouPanel() {
         <input id="kz-endpoint" value="${cfg.endpoint || ''}" placeholder="https://api.ai.five-plus-one.com/v1/chat/completions" ${is51 ? 'disabled' : ''}>
         <label>API Key</label>
         <input id="kz-apikey" type="password" value="${cfg.apiKey || ''}" placeholder="sk-...">
+        <div id="kz-apikey-link" style="margin-top:6px;display:${is51 ? 'block' : 'none'}">
+            <a href="https://api.ai.five-plus-one.com/console/token" target="_blank"
+               style="font-size:12px;color:#2166ad;text-decoration:none;font-weight:600;">点击获取访问凭证 →</a>
+        </div>
         <label>模型</label>
         <select id="kz-model">${modelOpts}</select>
         <input id="kz-model-custom" placeholder="自定义模型名" style="margin-top:6px;display:${curModel === '__custom__' || (!is51 && curModel === 'custom') ? 'block' : 'none'}">
@@ -471,6 +475,7 @@ function createKezhouPanel() {
         ep.disabled = is51Now;
         if (is51Now) ep.value = 'https://api.ai.five-plus-one.com/v1/chat/completions';
         else ep.value = '';
+        panel.querySelector('#kz-apikey-link').style.display = is51Now ? 'block' : 'none';
         const mSel = panel.querySelector('#kz-model');
         mSel.innerHTML = is51Now
             ? '<option value="courseflow">courseflow（推荐）</option><option value="mimo-v2.6-pro">mimo-v2.6-pro</option><option value="__custom__">自定义…</option>'

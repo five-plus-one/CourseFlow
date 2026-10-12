@@ -92,6 +92,14 @@ const KezhouMain = {
         // 首次引导
         if (!OOBE.isDone()) {
             setTimeout(() => OOBE.show(), 800);
+        } else {
+            // OOBE 已完成但 key 为空（跳过过/被清）→ 再弹引导
+            try {
+                const cfg = AIEngine.getConfig();
+                if (!cfg.apiKey && (this.options.autoQuiz || this.options.autoMidQuiz)) {
+                    setTimeout(() => OOBE.show(), 800);
+                }
+            } catch (e) { }
         }
 
         // 刷新自动恢复运行
@@ -116,8 +124,10 @@ const KezhouMain = {
         if (adapter && adapter.isDetailPage()) {
             const cfg = AIEngine.getConfig();
             if ((this.options.autoQuiz || this.options.autoMidQuiz) && !cfg.apiKey) {
-                kzToast('请先在设置里配置 AI API Key', 'error');
-                toggleKezhouPanel(true);
+                // 无 API Key → 弹 OOBE 引导（含获取链接），替代仅 toast
+                kzToast('请先配置 AI API Key', 'error');
+                if (typeof OOBE !== 'undefined') OOBE.show();
+                else toggleKezhouPanel(true);
                 return;
             }
             this.log(`AI: model=${cfg.model} endpoint=${cfg.endpoint}`, 'i');
