@@ -32,7 +32,7 @@ const KezhouMain = {
         autoVideo: true,
         autoQuiz: true,
         autoMidQuiz: true,
-        autoNext: false,
+        autoNext: true,
         confirmSeconds: 10,
         submitMode: 'submit',
         skipWatched: true,
@@ -70,11 +70,9 @@ const KezhouMain = {
             if (saved) Object.assign(this.options, JSON.parse(saved));
         } catch (e) { }
         try { this.mode = GM_getValue('kezhou-mode') || 'normal'; } catch (e) { }
-        // 一次性迁移
+        // 一次性迁移（v0.3.0 的误跳问题，不再强制改 autoNext）
         if (!GM_getValue('kezhou-migrated-0.3.0')) {
-            this.options.autoNext = false;
             GM_setValue('kezhou-migrated-0.3.0', true);
-            GM_setValue('kezhou-options', JSON.stringify(this.options));
         }
 
         const adapter = window.__KEZHOU_ADAPTER__;
