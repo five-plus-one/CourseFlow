@@ -265,11 +265,22 @@ const KezhouMain = {
 
         // 优先测验（测验页可能残留 video iframe）
         if (isQuiz && this.options.autoQuiz && !this.quizDone) {
+            this._emptyTicks = 0;
             await this.handleQuiz(adapter);
         } else if (isVideo && this.options.autoVideo) {
+            this._emptyTicks = 0;
             this.handleVideo(adapter);
         } else if (!isVideo && !isQuiz) {
-            if (this.tickCount % 4 === 1) this.log('既非视频也非测验，等待…');
+            // 纯文本/图片页：连续 3 次 tick（~7.5s）无内容 → 自动推进到下一个
+            this._emptyTicks = (this._emptyTicks || 0) + 1;
+            if (this._emptyTicks >= 3) {
+                this._emptyTicks = 0;
+                this.log('纯文本页（无视频/测验/任务点）→ 自动推进', 'o');
+                this.say('纯文本页，自动跳过', 'info');
+                await this.onAllTasksDone(adapter);
+            } else if (this.tickCount % 4 === 1) {
+                this.log(`纯文本页，等待内容加载…（${this._emptyTicks}/3）`);
+            }
         }
     },
 

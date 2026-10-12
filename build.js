@@ -74,6 +74,8 @@ function buildHeader(version) {
         `// @grant        GM_registerMenuCommand`,
         `// @connect      *`,
         `// @run-at       document-idle`,
+        `// @updateURL    https://five-plus-one.github.io/CourseFlow/courseflow.user.js`,
+        `// @downloadURL  https://five-plus-one.github.io/CourseFlow/courseflow.user.js`,
         `// ==/UserScript==`,
         '',
     ];

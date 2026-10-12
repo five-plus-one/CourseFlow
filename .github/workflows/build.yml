@@ -1,0 +1,93 @@
+name: Build & Deploy
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # terser 来自 AI-Marker-Suite 项目，CI 里直接装
+      - run: npm install terser --no-save
+
+      - name: Build userscript
+        run: node build.js
+
+      - name: Get version
+        id: ver
+        run: echo "version=$(node -p "require('fs').readFileSync('src/core/config.js','utf8').match(/VERSION:\s*'([^']+)'/)[1]")" >> "$GITHUB_OUTPUT"
+
+      # 拷贝产物到 Pages 目录（同时放安装页）
+      - name: Prepare Pages
+        run: |
+          cp dist/courseflow.user.js .github/pages/
+          cp .github/pages/index.html .github/pages/index.html
+
+      # 发 GitHub Release（tag = 版本号）
+      - name: Create Release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v${{ steps.ver.outputs.version }}"
+          if ! git rev-parse "$TAG" >/dev/null 2>&1; then
+            git tag "$TAG"
+            git push origin "$TAG"
+            gh release create "$TAG" \
+              dist/courseflow.user.js \
+              --title "课舟 v${{ steps.ver.outputs.version }}" \
+              --notes "自动构建发布"
+          else
+            echo "Tag $TAG already exists, skip release"
+          fi
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - run: npm install terser --no-save
+
+      - name: Build userscript
+        run: node build.js
+
+      - name: Prepare Pages
+        run: |
+          mkdir -p _site
+          cp dist/courseflow.user.js _site/
+          cp .github/pages/index.html _site/
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

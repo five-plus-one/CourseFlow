@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>课舟 CourseFlow · 安装</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", "PingFang SC", "Microsoft YaHei", sans-serif; background: #f7f8fa; color: #172033; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+.container { max-width: 560px; width: 92vw; }
+.card { background: #fff; border: 1px solid #e1e6ef; border-radius: 20px; padding: 48px 40px; box-shadow: 0 24px 64px rgba(18,28,45,0.1); text-align: center; }
+.logo { width: 80px; height: 80px; margin: 0 auto 20px; background: linear-gradient(135deg, #172033, #2166ad); border-radius: 20px; display: flex; align-items: center; justify-content: center; font-size: 36px; color: #fff; font-weight: 700; }
+h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; }
+.ver { font-size: 13px; color: #667085; margin-bottom: 28px; }
+.desc { font-size: 15px; color: #4a5568; line-height: 1.8; margin-bottom: 32px; text-align: left; }
+.desc li { margin-bottom: 8px; padding-left: 20px; position: relative; }
+.desc li::before { content: "✓"; position: absolute; left: 0; color: #287047; font-weight: 700; }
+.install-btn { display: inline-flex; align-items: center; gap: 10px; padding: 16px 40px; background: #172033; color: #fff; border: none; border-radius: 12px; font-size: 17px; font-weight: 700; cursor: pointer; text-decoration: none; transition: all .2s; box-shadow: 0 8px 24px rgba(23,32,51,0.25); }
+.install-btn:hover { background: #0f1725; transform: translateY(-2px); }
+.note { margin-top: 20px; font-size: 13px; color: #667085; line-height: 1.7; }
+.note a { color: #2166ad; text-decoration: none; }
+.steps { text-align: left; margin: 28px 0; padding: 20px 24px; background: #f7f8fa; border-radius: 12px; font-size: 13.5px; color: #4a5568; line-height: 2; }
+.steps b { color: #172033; }
+.footer { margin-top: 28px; font-size: 12px; color: #aaa; }
+</style>
+</head>
+<body>
+<div class="container">
+<div class="card">
+  <div class="logo">舟</div>
+  <h1>课舟 CourseFlow</h1>
+  <div class="ver">v0.8.2 · 学习通 / 超星 自动学习助手</div>
+
+  <div class="desc">
+    <ul>
+      <li>自动播放视频（可跳过已看、可调倍速）</li>
+      <li>视频中插题 / 章节测验自动作答</li>
+      <li>AI 视觉识别截图答题，答案 + 详细解析</li>
+      <li>多任务点队列调度，自动切知识点 / 跳节</li>
+      <li>自动发表讨论、作答历史导出</li>
+    </ul>
+  </div>
+
+  <a class="install-btn" href="./courseflow.user.js">
+    ⬇ 一键安装脚本
+  </a>
+
+  <div class="steps">
+    <b>安装步骤：</b><br>
+    1. 先安装 <a href="https://www.tampermonkey.net/" target="_blank"><b>Tampermonkey</b></a> 浏览器扩展<br>
+    2. 点击上方「一键安装脚本」按钮<br>
+    3. 在 Tampermonkey 弹窗中确认安装<br>
+    4. 打开学习通课程页面，点击「课舟 · 开始学习」
+  </div>
+
+  <div class="note">
+    已安装用户：脚本会在每次发布后<b>自动更新</b>，无需手动操作。<br>
+    源码：<a href="https://github.com/five-plus-one/CourseFlow" target="_blank">GitHub · five-plus-one/CourseFlow</a>
+  </div>
+
+  <div class="footer">本工具仅供学习交流，请遵守学校相关规定</div>
+</div>
+</div>
+</body>
+</html>
