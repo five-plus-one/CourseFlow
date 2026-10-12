@@ -125,7 +125,14 @@ function ensureKezhouStyles() {
         .kz-panel input:focus { outline: none !important; border-color: #2166ad !important; box-shadow: 0 0 0 3px rgba(33,102,173,0.12) !important; }
         .kz-panel input:disabled { background: #f3f6fa !important; color: #98a2b3 !important; }
         .kz-check { display: flex !important; align-items: center !important; gap: 8px !important; margin: 10px 0 !important; font-size: 13px !important; color: #344054 !important; }
-        .kz-check input { width: auto !important; }
+        .kz-check input[type="checkbox"] {
+            width: 18px !important; height: 18px !important; padding: 0 !important;
+            border: none !important; border-radius: 4px !important; box-shadow: none !important;
+            accent-color: #2166ad !important; flex-shrink: 0 !important; cursor: pointer !important;
+        }
+        .kz-check input[type="checkbox"]:focus {
+            outline: none !important; box-shadow: 0 0 0 2px rgba(33,102,173,0.25) !important;
+        }
         .kz-btn-row { display: flex !important; gap: 10px !important; margin-top: 20px !important; }
         .kz-btn { flex: 1 !important; padding: 11px 0 !important; border-radius: 8px !important; font-size: 13px !important; font-weight: 700 !important; cursor: pointer !important; border: none !important; text-align: center !important; }
         .kz-btn-primary { background: #172033 !important; color: #fff !important; box-shadow: 0 6px 16px rgba(18,28,45,0.18) !important; }
