@@ -157,8 +157,23 @@ const XXTQuiz = {
             });
 
             // hidden inputs
-            const ansInput = el.querySelector('input[id^="answer"], input[name^="answer"]');
+            const ansInput = el.querySelector('input[id^="answer"]:not([id^="answerEditor"]):not([id^="answerwqbid"]), input[name^="answer"]:not([name^="answerEditor"])');
             const typeInput = el.querySelector('input[id^="answertype"]');
+
+            // 填空题：提取每个空的 UEditor 实例 / hidden textarea
+            const blanks = [];
+            if (type === 'blank') {
+                el.querySelectorAll('div.blankItemDiv').forEach((bd, bi) => {
+                    const ta = bd.querySelector('textarea[name^="answerEditor"], textarea[id^="answerEditor"]');
+                    const inpDiv = bd.querySelector('div[id^="inpDiv"]');
+                    blanks.push({
+                        index: bi,
+                        textArea: ta,
+                        inpDiv,
+                        ueId: ta ? ta.id : '',  // UE.getEditor 的 id，如 "answerEditor4057563601"
+                    });
+                });
+            }
 
             questions.push({
                 index: i,
@@ -169,6 +184,7 @@ const XXTQuiz = {
                 element: el,
                 ansInput,
                 typeInput,
+                blanks,
                 current: ansInput ? ansInput.value : '',
             });
         });
@@ -191,17 +207,91 @@ const XXTQuiz = {
     },
 
     /**
+     * 填空题：写 UEditor 编辑器内容
+     * 单空：直接写全文
+     * 多空：用 ;; 分隔（如 "答案1;;答案2"），逐个写入
+     */
+    _fillBlank(question, answer) {
+        const blanks = question.blanks || [];
+        if (!blanks.length) return false;
+
+        // 拆分多空答案（;; 或 | 分隔）
+        const parts = String(answer).split(/;;|\|/).map(s => s.trim()).filter(Boolean);
+        let ok = 0;
+
+        for (let i = 0; i < blanks.length; i++) {
+            const b = blanks[i];
+            const text = parts[i] !== undefined ? parts[i] : (blanks.length === 1 ? String(answer).trim() : '');
+            if (!text) continue;
+
+            // 优先走 UEditor API
+            let filled = false;
+            try {
+                const ue = window.UE && UE.getEditor && UE.getEditor(b.ueId);
+                if (ue && ue.setContent) {
+                    ue.setContent(text);
+                    filled = true;
+                }
+            } catch (e) { }
+
+            // 退化：写 hidden textarea + 触发 contentChange
+            if (!filled && b.textArea) {
+                try {
+                    b.textArea.value = text;
+                    b.textArea.dispatchEvent(new Event('change', { bubbles: true }));
+                    b.textArea.dispatchEvent(new Event('input', { bubbles: true }));
+                    // 同步 inpDiv（平台靠这个显示内容）
+                    if (b.inpDiv) {
+                        b.inpDiv.innerHTML = text;
+                        b.inpDiv.style.display = 'block';
+                    }
+                    filled = true;
+                } catch (e) { }
+            }
+
+            if (filled) ok++;
+        }
+
+        // 更新 tiankongsize 和 answerwqbid
+        try {
+            const tkSize = question.element.querySelector('input[name^="tiankongsize"]');
+            if (tkSize) tkSize.value = String(blanks.length);
+        } catch (e) { }
+
+        // 标记已作答（answerwqbid）
+        try {
+            const wq = document.getElementById('answerwqbid')
+                || (question.element.ownerDocument && question.element.ownerDocument.getElementById('answerwqbid'));
+            if (wq && question.qid) {
+                const cur = (wq.value || '').split(',').filter(Boolean);
+                if (!cur.includes(question.qid)) {
+                    cur.push(question.qid);
+                    wq.value = cur.join(',') + ',';
+                }
+            }
+        } catch (e) { }
+
+        return ok > 0;
+    },
+
+    /**
      * 选中答案
      * 单选/判断：点 li（触发 addChoice），设 hidden = 'A' / 'true'/'false'
      * 多选：逐个点 li（addMultipleChoice），设 hidden = 'ABC'
+     * 填空：写 UEditor 编辑器内容
      */
     select(question, answer) {
-        // answer: 'A' | 'AB' | 'true'/'false' | '对'/'错'
-        let keys = [];
+        // answer: 'A' | 'AB' | 'true'/'false' | '对'/'错' | 填空文本
         const t = question.type;
+
+        // ---- 填空题：写 UEditor ----
+        if (t === 'blank') {
+            return this._fillBlank(question, answer);
+        }
+
+        let keys = [];
         if (t === 'judge') {
             const v = (answer === 'true' || answer === '对' || answer === 'A' || answer === '对的') ? 'true' : 'false';
-            // judge 选项 key 是 true/false，显示是 对/错
             keys = [v];
         } else {
             keys = String(answer).toUpperCase().split('').filter(c => /[A-H]/.test(c));
