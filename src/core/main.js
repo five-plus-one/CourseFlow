@@ -306,17 +306,27 @@ const KezhouMain = {
             this.taskLocalDone[String(task.jobId)] = true;
             this.log(`任务#${task.index}(${task.type}) 标记完成 jobid=${task.jobId}${reason ? ' · ' + reason : ''}`, 'o');
         }
-        // 完成任务点后触发自动讨论（带 30s 冷却）
+        // 同步先锁住队列（防止 onAllTasksDone 在发帖开始前就跳转），
+        // _maybeAutoDiscuss 完成后在 finally 里解锁
+        if (this.options.autoDiscuss && window.__KEZHOU_DISCUSS__) {
+            if (!(Date.now() - (this._lastDiscuss || 0) < 30000)) {
+                this._discussBusy = true;
+            }
+        }
         this._maybeAutoDiscuss();
     },
 
     async _maybeAutoDiscuss() {
-        if (!this.options.autoDiscuss) return;
-        if (!window.__KEZHOU_DISCUSS__) return;
-        if (Date.now() - (this._lastDiscuss || 0) < 30000) return;
+        if (!this.options.autoDiscuss || !window.__KEZHOU_DISCUSS__) {
+            this._discussBusy = false;
+            return;
+        }
+        if (Date.now() - (this._lastDiscuss || 0) < 30000) {
+            this._discussBusy = false;
+            return;
+        }
         this._lastDiscuss = Date.now();
 
-        this._discussBusy = true;
         try {
             const adapter = window.__KEZHOU_ADAPTER__;
             const params = adapter ? adapter.getParams() : {};
@@ -722,10 +732,22 @@ const KezhouMain = {
         // 已答完 → 只点「继续学习」，绝不调 AI
         if (adapter.isMidQuizResolved(hit.doc)) {
             const ok = adapter.clickMidQuizContinue(hit.doc);
-            this.log(ok ? '中插题已答完 → 点「继续学习」' : '中插题已答完但找不到继续按钮', ok ? 'o' : 'e');
+            if (ok) {
+                this._midQuizStuck = 0;
+                this.log('中插题已答完 → 点「继续学习」', 'o');
+                return;
+            }
+            // 找不到继续按钮：加熔断，3 次失败后放弃（视频可能自动继续/已关闭）
+            this._midQuizStuck = (this._midQuizStuck || 0) + 1;
+            if (this._midQuizStuck <= 3) {
+                this.log(`中插题已答完但找不到继续按钮（${this._midQuizStuck}/3）`, 'e');
+            } else if (this._midQuizStuck === 4) {
+                this.log('中插题继续按钮始终找不到，放弃等待（不影响后续）', 'i');
+            }
             return;
         }
 
+        this._midQuizStuck = 0;
         this.midQuizBusy = true;
         try {
             const q = adapter.parseMidQuiz(hit);
