@@ -4,7 +4,7 @@
 const SCRIPT_CONFIG = {
     NAME: '课舟',
     ID: 'courseflow',
-    VERSION: '0.8.7',
+    VERSION: '0.8.8',
 
     /** 默认 AI 端点（OpenAI 兼容） */
     DEFAULT_ENDPOINT: 'https://api.ai.five-plus-one.com/v1/chat/completions',
