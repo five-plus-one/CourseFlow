@@ -34,6 +34,7 @@ const KezhouMain = {
         autoVideo: true,
         autoQuiz: true,
         autoMidQuiz: true,
+        midQuizMode: 'ai',      // 中插题作答方式：ai=AI 优先（答错再枚举） | enum=直接枚举选项（不调 AI）
         autoNext: true,
         confirmSeconds: 10,
         submitMode: 'submit',
@@ -816,33 +817,38 @@ const KezhouMain = {
                 return;
             }
 
-            // ---- 首次作答：先取 AI 答案（命中缓存不重复调）----
+            // ---- 首次作答：默认先取 AI 答案；「直接枚举」模式跳过 AI ----
+            const useAI = this.options.midQuizMode !== 'enum';
             if (!rec.aiTried && rec.tried.length === 0) {
                 rec.aiTried = true;
-                const cached = this._aiCache && this._aiCache[cacheKey];
-                if (cached) {
-                    rec.aiAnswer = this._normalizeMidAnswer(q, cached.answer);
-                    this.log('中插题命中缓存 → ' + (rec.aiAnswer || cached.answer), 'o');
+                if (!useAI) {
+                    this.log('中插题：直接枚举模式（不调 AI，答错自动换选项）', 'i');
                 } else {
-                    this.log(`中插题 [${q.type}] ${q.stem.slice(0, 50)}`, 'i');
-                    let r = null;
-                    for (let attempt = 1; attempt <= 3; attempt++) {
-                        r = await AIEngine.answerQuestion(q);
-                        if (r.ok) break;
-                        this.log(`中插题 AI 失败（第${attempt}次）：${(r.error || '').slice(0, 80)}`, 'e');
-                        if (attempt < 3) await new Promise(res => setTimeout(res, 3000));
-                    }
-                    if (this.epoch !== myEpoch) {
-                        this.log('章节已切换，中止中插题作答', 'e');
-                        return;
-                    }
-                    if (r && r.ok) {
-                        rec.aiAnswer = this._normalizeMidAnswer(q, r.answer);
-                        this._aiCache = this._aiCache || {};
-                        this._aiCache[cacheKey] = { answer: r.answer, explain: r.explain };
-                        this.log(`AI 答案=${r.answer}${rec.aiAnswer ? '（选项 ' + rec.aiAnswer + '）' : ''}`, 'o');
+                    const cached = this._aiCache && this._aiCache[cacheKey];
+                    if (cached) {
+                        rec.aiAnswer = this._normalizeMidAnswer(q, cached.answer);
+                        this.log('中插题命中缓存 → ' + (rec.aiAnswer || cached.answer), 'o');
                     } else {
-                        this.log('中插题 AI 3 次重试均失败 → 直接枚举选项', 'e');
+                        this.log(`中插题 [${q.type}] ${q.stem.slice(0, 50)}`, 'i');
+                        let r = null;
+                        for (let attempt = 1; attempt <= 3; attempt++) {
+                            r = await AIEngine.answerQuestion(q);
+                            if (r.ok) break;
+                            this.log(`中插题 AI 失败（第${attempt}次）：${(r.error || '').slice(0, 80)}`, 'e');
+                            if (attempt < 3) await new Promise(res => setTimeout(res, 3000));
+                        }
+                        if (this.epoch !== myEpoch) {
+                            this.log('章节已切换，中止中插题作答', 'e');
+                            return;
+                        }
+                        if (r && r.ok) {
+                            rec.aiAnswer = this._normalizeMidAnswer(q, r.answer);
+                            this._aiCache = this._aiCache || {};
+                            this._aiCache[cacheKey] = { answer: r.answer, explain: r.explain };
+                            this.log(`AI 答案=${r.answer}${rec.aiAnswer ? '（选项 ' + rec.aiAnswer + '）' : ''}`, 'o');
+                        } else {
+                            this.log('中插题 AI 3 次重试均失败 → 直接枚举选项', 'e');
+                        }
                     }
                 }
                 if (this.epoch !== myEpoch) return;

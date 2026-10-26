@@ -390,6 +390,11 @@ function createKezhouPanel() {
         <div class="kz-check"><input type="checkbox" id="kz-auto-video"><span>自动播放视频</span></div>
         <div class="kz-check"><input type="checkbox" id="kz-auto-quiz"><span>自动章节测验</span></div>
         <div class="kz-check"><input type="checkbox" id="kz-auto-midquiz"><span>自动答视频中插题</span></div>
+        <label>插题作答方式</label>
+        <select id="kz-midquiz-mode">
+            <option value="ai">AI 优先（答错后自动枚举选项）</option>
+            <option value="enum">直接枚举选项（不调 AI，省额度）</option>
+        </select>
         <div class="kz-check"><input type="checkbox" id="kz-auto-next"><span>完成后自动下一节</span></div>
         <div class="kz-check"><input type="checkbox" id="kz-skip-watched"><span>跳过已看过的视频</span></div>
 
@@ -524,6 +529,7 @@ function createKezhouPanel() {
         m.options.autoVideo = panel.querySelector('#kz-auto-video').checked;
         m.options.autoQuiz = panel.querySelector('#kz-auto-quiz').checked;
         m.options.autoMidQuiz = panel.querySelector('#kz-auto-midquiz').checked;
+        m.options.midQuizMode = panel.querySelector('#kz-midquiz-mode').value || 'ai';
         m.options.autoNext = panel.querySelector('#kz-auto-next').checked;
         m.options.skipWatched = panel.querySelector('#kz-skip-watched').checked;
         // 讨论设置
@@ -556,6 +562,7 @@ function syncKezhouPanel() {
     chk('kz-auto-video', m.options.autoVideo);
     chk('kz-auto-quiz', m.options.autoQuiz);
     chk('kz-auto-midquiz', m.options.autoMidQuiz);
+    set('kz-midquiz-mode', m.options.midQuizMode || 'ai');
     chk('kz-auto-next', m.options.autoNext);
     chk('kz-skip-watched', m.options.skipWatched);
     // 讨论设置
