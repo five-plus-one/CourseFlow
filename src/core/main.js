@@ -744,9 +744,16 @@ const KezhouMain = {
                 this.log('中插题命中缓存 → ' + answer, 'o');
             } else {
                 this.log(`中插题 [${q.type}] ${q.stem.slice(0, 50)}`, 'i');
-                const r = await AIEngine.answerQuestion(q);
+                // AI 调用加重试（504 超时等瞬态错误很常见）
+                let r = null;
+                for (let attempt = 1; attempt <= 3; attempt++) {
+                    r = await AIEngine.answerQuestion(q);
+                    if (r.ok) break;
+                    this.log(`中插题 AI 失败（第${attempt}次）：${(r.error || '').slice(0, 80)}`, 'e');
+                    if (attempt < 3) await new Promise(res => setTimeout(res, 3000));
+                }
                 if (!r.ok) {
-                    this.log('AI 失败：' + (r.error || '').slice(0, 100), 'e');
+                    this.log('中插题 AI 3 次重试均失败，跳过', 'e');
                     return;
                 }
                 answer = r.answer;
