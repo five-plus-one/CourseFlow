@@ -190,6 +190,7 @@ const KezhouMain = {
             this.currentTask = null;
             this._knowledgeStep = 0;
             this._quizSwitchTries = 0;
+            this._verifyBusy = false;
             this.unbindVideo();
         } else if (p.chapterId && this.lastChapterId && p.chapterId !== this.lastChapterId) {
             this.log(`章节变化: ${this.lastChapterId} → ${p.chapterId}，熔断旧任务`, 'i');
@@ -204,6 +205,7 @@ const KezhouMain = {
             this.currentTask = null;
             this._knowledgeStep = 0;
             this._quizSwitchTries = 0;
+            this._verifyBusy = false;
             this.unbindVideo();
         }
 
@@ -389,9 +391,13 @@ const KezhouMain = {
     },
 
     async onAllTasksDone(adapter) {
-        // 发帖进行中：等发完再继续（切知识点/跳节）
+        // 发帖/核对进行中：等完成再继续（切知识点/跳节）
         if (this._discussBusy) {
             if (this.tickCount % 4 === 1) this.log('发帖进行中，等待完成…', 'i');
+            return;
+        }
+        if (this._verifyBusy) {
+            if (this.tickCount % 4 === 1) this.log('判卷核对中，等待完成…', 'i');
             return;
         }
 
@@ -446,9 +452,12 @@ const KezhouMain = {
      * 轮询最多 60s，直到出现带「标准答案」的批阅记录
      */
     scheduleAnswerVerify(histId, task) {
+        // 同步锁住队列，核对完成/超时后在 finally 解锁
+        this._verifyBusy = true;
         const maxAttempts = 20;
         const delayMs = 3000;
         let attempt = 0;
+        const myEpoch = this.epoch;
 
         const findGradedRecords = () => {
             // 先试任务点内的文档，再退化为全文档搜索
@@ -479,6 +488,12 @@ const KezhouMain = {
         };
 
         const tryVerify = () => {
+            // 页面已跳走 → 提前终止核对
+            if (this.epoch !== myEpoch) {
+                this.log('页面已切换，取消判卷核对', 'i');
+                this._verifyBusy = false;
+                return;
+            }
             attempt++;
             try {
                 const recs = findGradedRecords();
@@ -524,6 +539,7 @@ const KezhouMain = {
                         this.log(`对错回填完成：${entry.questions.length - wrongCount}对 ${wrongCount}错`, wrongCount > 0 ? 'i' : 'o');
                         if (wrongCount > 0) this.say(`本测验 ${wrongCount} 题答错`, 'err');
                     }
+                    this._verifyBusy = false;
                     return;
                 }
             } catch (e) {
@@ -533,6 +549,7 @@ const KezhouMain = {
                 setTimeout(tryVerify, delayMs);
             } else {
                 this.log('核对超时：成绩页未出现标准答案，跳过回填', 'i');
+                this._verifyBusy = false;
             }
         };
 
