@@ -12,8 +12,9 @@ const KezhouMain = {
     videoBound: null,
     lastRatio: 0,
     midQuizBusy: false,
-    _midQuizState: {},      // 题干前缀 → {tried, aiAnswer, wrongCount, lastAt, lastSubmitted, handledWrong, done}
+    _midQuizState: {},      // 题目指纹 → {tried, aiAnswer, wrongCount, lastAt, lastSubmitted, handledWrong, round, done}
     _midQuizStuck: 0,
+    _midQuizAbsent: 0,      // 中插题浮层连续消失的 tick 数（≥2 视为本题结束）
     quizDone: false,
     quizBusy: false,
     modalOpen: false,
@@ -138,6 +139,7 @@ const KezhouMain = {
         this.quizBusy = false;
         this._midQuizState = {};
         this._midQuizStuck = 0;
+        this._midQuizAbsent = 0;
         this.playRetry = 0;
         this.taskLocalDone = {};
         this.currentTask = null;
@@ -191,6 +193,7 @@ const KezhouMain = {
             this.quizBusy = false;
             this._midQuizState = {};
             this._midQuizStuck = 0;
+            this._midQuizAbsent = 0;
             this.lastRatio = 0;
             this._seekedFor = null;
             this.taskLocalDone = {};
@@ -208,6 +211,7 @@ const KezhouMain = {
             this.quizBusy = false;
             this._midQuizState = {};
             this._midQuizStuck = 0;
+            this._midQuizAbsent = 0;
             this.lastRatio = 0;
             this._seekedFor = null;
             this.taskLocalDone = {};
@@ -238,9 +242,16 @@ const KezhouMain = {
         if (this.running && this.options.autoMidQuiz && Date.now() - (this._lastMidQuiz || 0) > 2000) {
             const mid = adapter.detectMidVideoQuiz();
             if (mid) {
+                this._midQuizAbsent = 0;
                 this._lastMidQuiz = Date.now();
                 await this.handleMidQuiz(adapter, mid);
                 return;
+            }
+            // 浮层连续消失 2 个 tick（≈5s）→ 视为这一题结束，清空作答记录。
+            // 否则下一题（DOM 复用 / 题干前缀相同）会误用上一题试过的答案。
+            this._midQuizAbsent = (this._midQuizAbsent || 0) + 1;
+            if (this._midQuizAbsent >= 2 && this._midQuizState && Object.keys(this._midQuizState).length) {
+                this._midQuizState = {};
             }
         }
 
@@ -789,11 +800,18 @@ const KezhouMain = {
             }
 
             const cacheKey = q.stem.slice(0, 60);
+            // 题目指纹 = 题型 + 完整题干 + 全部选项文本。
+            // 不要只用 60 字题干前缀：两题前缀相同会把上一题的 tried 串过来。
+            const sig = q.type + '::' + q.stem + '::' +
+                (q.options || []).map(o => o.key + '.' + o.text).join('|');
             this._midQuizState = this._midQuizState || {};
-            const rec = this._midQuizState[cacheKey] || (this._midQuizState[cacheKey] = {
-                tried: [], aiAnswer: '', aiTried: false, wrongCount: 0,
-                lastAt: 0, lastSubmitted: '', handledWrong: '', done: false,
-            });
+            let rec = this._midQuizState[sig];
+            if (!rec) {
+                rec = this._midQuizState[sig] = {
+                    sig, round: 1, tried: [], aiAnswer: '', aiTried: false, wrongCount: 0,
+                    lastAt: 0, lastSubmitted: '', handledWrong: '', done: false,
+                };
+            }
             if (rec.done) return;
 
             // ---- 平台刚判错：记录这次反馈，本轮换答案 ----
@@ -854,18 +872,22 @@ const KezhouMain = {
                 if (this.epoch !== myEpoch) return;
             }
 
-            // ---- 选下一个没试过的答案 ----
-            const MAX_TRIES = 10;
-            if (rec.tried.length >= MAX_TRIES) {
-                rec.done = true;
-                this.log(`中插题已试 ${rec.tried.length} 个答案仍未答对，停止自动作答，请手动选择`, 'e');
-                this.say('中插题需要手动作答', 'err');
-                return;
-            }
-            const answer = this._pickMidAnswer(q, rec);
+            // ---- 选下一个没试过的答案；一轮枚举完还没对 → 再来一轮（最多 3 轮）----
+            const MAX_ROUNDS = 3;
+            let answer = this._pickMidAnswer(q, rec);
             if (!answer) {
+                if ((rec.round || 1) < MAX_ROUNDS) {
+                    rec.round = (rec.round || 1) + 1;
+                    rec.tried = [];
+                    rec.lastSubmitted = '';
+                    rec.handledWrong = '';
+                    rec.lastAt = 0;
+                    this.log(`中插题第 ${rec.round - 1} 轮枚举未通过 → 开始第 ${rec.round}/${MAX_ROUNDS} 轮枚举`, 'e');
+                    this.say(`插题开始第 ${rec.round} 轮枚举`, 'info');
+                    return;   // 下一轮 tick 重新从第一个选项开始
+                }
                 rec.done = true;
-                this.log('中插题已无可尝试的新答案 → 停止自动作答，请手动选择', 'e');
+                this.log(`中插题 ${MAX_ROUNDS} 轮枚举仍未答对 → 停止自动作答，请手动选择`, 'e');
                 this.say('中插题需要手动作答', 'err');
                 return;
             }
@@ -882,7 +904,7 @@ const KezhouMain = {
             await new Promise(res => setTimeout(res, 200));
             const submitted = adapter.clickMidQuizSubmit(doc);
             this.log(
-                `中插题第${rec.tried.length}次作答 → ${answer}` +
+                `中插题第${rec.round}轮·第${rec.tried.length}次作答 → ${answer}` +
                 (rec.aiAnswer && answer === rec.aiAnswer ? '（AI）' : '（枚举）'),
                 'o'
             );
