@@ -618,24 +618,68 @@ const XuexitongAdapter = {
         } catch (e) { return false; }
     },
 
-    /** 中插题是否已经答完 */
-    isMidQuizResolved(doc) {
+    /**
+     * 浮层内的短文案反馈节点（回答错误 / 回答正确 …）
+     * 只看叶子节点 + 短文本，避免误匹配题干里出现的「错误」等字样
+     */
+    _findMidFeedback(root) {
+        if (!root) return '';
+        const re = /^(回答错误|回答正确|答错了|答对了|真遗憾|恭喜你答对了|恭喜答对|回答不正确)/;
+        try {
+            for (const el of root.querySelectorAll('*')) {
+                if (el.children && el.children.length) continue;   // 只看叶子
+                const t = (el.textContent || '').replace(/\s+/g, '').trim();
+                if (!t || t.length > 16 || !re.test(t)) continue;
+                if (!this._isReallyVisible(el)) continue;
+                return t;
+            }
+        } catch (e) { }
+        return '';
+    },
+
+    /**
+     * 中插题当前状态
+     * @returns {{state:'resolved'|'wrong'|'pending', source:string}}
+     *   resolved = 已答完/答对（「继续学习」或「恭喜答对」可见）
+     *   wrong    = 平台明确提示答错（实测：浮层显示「回答错误」，提交按钮仍可点，可换选项重试）
+     *   pending  = 等待作答 / 等待判题反馈
+     */
+    getMidQuizStatus(doc) {
         try {
             const d = doc || this._findAnyDoc();
-            // 「继续学习」真正可见 = 已答完
+
+            // ---- 已答完 / 答对 ----
             const cont = d.querySelector('#videoquiz-continue');
-            if (this._isReallyVisible(cont)) return true;
-            // 「恭喜你答对了」真正可见
+            if (this._isReallyVisible(cont)) return { state: 'resolved', source: 'continue' };
             const spanHas = d.querySelector('#spanHas');
-            if (this._isReallyVisible(spanHas) && (spanHas.textContent || '').trim()) return true;
+            if (this._isReallyVisible(spanHas) && (spanHas.textContent || '').trim()) {
+                return { state: 'resolved', source: 'spanHas' };
+            }
             const tip = d.querySelector('#InteractiveQuizTip');
-            if (this._isReallyVisible(tip)) return true;
-            // 提交按钮隐藏 + 有勾选 = 已提交
+            if (this._isReallyVisible(tip)) return { state: 'resolved', source: 'InteractiveQuizTip' };
+
+            // ---- 明确答错（可重试）----
+            const spanNot = d.querySelector('#spanNot');
+            if (this._isReallyVisible(spanNot) && (spanNot.textContent || '').trim()) {
+                return { state: 'wrong', source: 'spanNot' };
+            }
+            const root = d.querySelector('.tkTopic');
+            const phrase = this._findMidFeedback(root);
+            if (phrase) {
+                return { state: /错|不对|遗憾/.test(phrase) ? 'wrong' : 'resolved', source: 'phrase:' + phrase };
+            }
+
+            // ---- 兜底：提交按钮隐藏 + 有勾选 = 已提交 ----
             const submit = d.querySelector('#videoquiz-submit');
             const checked = d.querySelector('input[name="ans-videoquiz-opt"]:checked');
-            if (submit && !this._isReallyVisible(submit) && checked) return true;
+            if (submit && !this._isReallyVisible(submit) && checked) return { state: 'resolved', source: 'submit-hidden' };
         } catch (e) { }
-        return false;
+        return { state: 'pending', source: '' };
+    },
+
+    /** 中插题是否已经答完 */
+    isMidQuizResolved(doc) {
+        return this.getMidQuizStatus(doc).state === 'resolved';
     },
 
     parseMidQuiz(hit) {
@@ -672,7 +716,62 @@ const XuexitongAdapter = {
         return { type, stem, options, root, raw: raw.slice(0, 300), doc };
     },
 
-    /** 中插题：点选项 + 点提交；若已答完则点「继续学习」 */
+    /**
+     * 点选中插题选项（不提交）
+     * @returns {boolean} 是否点到了选项
+     */
+    clickMidQuizOption(midQ, answerKey) {
+        if (!midQ || !midQ.options || !midQ.options.length) return false;
+        const key = String(answerKey || '').toUpperCase();
+        if (!key) return false;
+
+        const opt = midQ.options.find(o => String(o.key).toUpperCase() === key)
+            || midQ.options.find(o => String(o.key).toUpperCase() === key[0]);
+        if (!opt) return false;
+
+        try {
+            // 单选/判断：先清掉其它选项的勾选态（平台不一定会自动清）
+            if (midQ.type !== 'multi') {
+                midQ.options.forEach(o => {
+                    if (o === opt || !o.input) return;
+                    try {
+                        if (o.input.checked) {
+                            o.input.checked = false;
+                            o.input.dispatchEvent(new Event('change', { bubbles: true }));
+                        }
+                    } catch (e) { }
+                });
+            }
+            opt.element.click();
+            if (opt.input) {
+                opt.input.checked = true;
+                opt.input.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            const lab = opt.element.querySelector('label');
+            if (lab) lab.click();
+            return true;
+        } catch (e) { }
+        return false;
+    },
+
+    /** 点「提交」；返回是否真的点到了 */
+    clickMidQuizSubmit(doc) {
+        const d = doc || this._findAnyDoc();
+        try {
+            const btn = d.querySelector('#videoquiz-submit');
+            if (this._isReallyVisible(btn)) { btn.click(); return true; }
+        } catch (e) { }
+        // 文本兜底（新版浮层可能换按钮结构）
+        try {
+            const root = d.querySelector('.tkTopic') || d;
+            const btn = Array.from(root.querySelectorAll('a, button'))
+                .find(el => (el.textContent || '').trim() === '提交' && this._isReallyVisible(el));
+            if (btn) { btn.click(); return true; }
+        } catch (e) { }
+        return false;
+    },
+
+    /** 中插题：点选项 + 点提交；若已答完则点「继续学习」（保留旧接口） */
     submitMidQuiz(midQ, answerKey) {
         const doc = midQ.doc || midQ.root.ownerDocument;
 
@@ -681,29 +780,11 @@ const XuexitongAdapter = {
             return this.clickMidQuizContinue(doc) ? 'continue' : false;
         }
 
-        const key = String(answerKey).toUpperCase();
-        const opt = midQ.options.find(o => o.key === key)
-            || midQ.options.find(o => o.key === key[0]);
-        if (!opt) return false;
-
-        try {
-            opt.element.click();
-            if (opt.input) {
-                opt.input.checked = true;
-                opt.input.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-            const lab = opt.element.querySelector('label');
-            if (lab) lab.click();
-        } catch (e) { }
+        if (!this.clickMidQuizOption(midQ, answerKey)) return false;
 
         // 点 #videoquiz-submit（真正可见时）
         setTimeout(() => {
-            const submit = doc.querySelector('#videoquiz-submit');
-            if (this._isReallyVisible(submit)) {
-                submit.click();
-            } else {
-                this.clickMidQuizContinue(doc);
-            }
+            if (!this.clickMidQuizSubmit(doc)) this.clickMidQuizContinue(doc);
         }, 150);
         return true;
     },

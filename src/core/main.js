@@ -12,6 +12,8 @@ const KezhouMain = {
     videoBound: null,
     lastRatio: 0,
     midQuizBusy: false,
+    _midQuizState: {},      // 题干前缀 → {tried, aiAnswer, wrongCount, lastAt, lastSubmitted, handledWrong, done}
+    _midQuizStuck: 0,
     quizDone: false,
     quizBusy: false,
     modalOpen: false,
@@ -133,6 +135,8 @@ const KezhouMain = {
         this.running = true;
         this.quizDone = false;
         this.quizBusy = false;
+        this._midQuizState = {};
+        this._midQuizStuck = 0;
         this.playRetry = 0;
         this.taskLocalDone = {};
         this.currentTask = null;
@@ -184,6 +188,8 @@ const KezhouMain = {
             this.lastChapterId = p.chapterId || '';
             this.quizDone = false;
             this.quizBusy = false;
+            this._midQuizState = {};
+            this._midQuizStuck = 0;
             this.lastRatio = 0;
             this._seekedFor = null;
             this.taskLocalDone = {};
@@ -199,6 +205,8 @@ const KezhouMain = {
             this.pageSig = curSig;
             this.quizDone = false;
             this.quizBusy = false;
+            this._midQuizState = {};
+            this._midQuizStuck = 0;
             this.lastRatio = 0;
             this._seekedFor = null;
             this.taskLocalDone = {};
@@ -225,8 +233,8 @@ const KezhouMain = {
             return;
         }
 
-        // 中插题（2 秒防抖）
-        if (this.options.autoMidQuiz && Date.now() - (this._lastMidQuiz || 0) > 2000) {
+        // 中插题（2 秒防抖）——必须在运行中才应答，暂停后不许继续提交
+        if (this.running && this.options.autoMidQuiz && Date.now() - (this._lastMidQuiz || 0) > 2000) {
             const mid = adapter.detectMidVideoQuiz();
             if (mid) {
                 this._lastMidQuiz = Date.now();
@@ -735,12 +743,25 @@ const KezhouMain = {
 
     // ---------- 视频中插题 ----------
 
+    /**
+     * 中插题作答状态机
+     * 旧 bug：答错后 isMidQuizResolved 恒为 false，而 AI 缓存里就是那个错误答案，
+     *         于是每轮 tick 都「命中缓存 → 提交同一个错误答案」，无限循环。
+     * 现策略（中插题不计入成绩，可安全试错）：
+     *   1. 同一答案绝不重复提交（tried 记录）
+     *   2. 首次用 AI 答案；答错后按选项枚举（单选 A→B→…；多选先单字母再双字母）
+     *   3. 判对 → 点「继续学习」；判错 → 换下一个答案；最多 10 次后停下交还用户
+     */
     async handleMidQuiz(adapter, hit) {
+        if (!this.running) return;
         if (this.midQuizBusy) return;
 
+        const doc = hit.doc;
+        const st = adapter.getMidQuizStatus(doc);
+
         // 已答完 → 只点「继续学习」，绝不调 AI
-        if (adapter.isMidQuizResolved(hit.doc)) {
-            const ok = adapter.clickMidQuizContinue(hit.doc);
+        if (st.state === 'resolved') {
+            const ok = adapter.clickMidQuizContinue(doc);
             if (ok) {
                 this._midQuizStuck = 0;
                 this.log('中插题已答完 → 点「继续学习」', 'o');
@@ -758,6 +779,7 @@ const KezhouMain = {
 
         this._midQuizStuck = 0;
         this.midQuizBusy = true;
+        const myEpoch = this.epoch;
         try {
             const q = adapter.parseMidQuiz(hit);
             if (!q || !q.options.length || !q.stem) {
@@ -765,51 +787,164 @@ const KezhouMain = {
                 return;
             }
 
-            // 同题缓存：避免反复调 AI 烧 token
             const cacheKey = q.stem.slice(0, 60);
-            const cached = this._aiCache && this._aiCache[cacheKey];
-            let answer, explain;
-            if (cached) {
-                answer = cached.answer;
-                explain = cached.explain;
-                this.log('中插题命中缓存 → ' + answer, 'o');
-            } else {
-                this.log(`中插题 [${q.type}] ${q.stem.slice(0, 50)}`, 'i');
-                // AI 调用加重试（504 超时等瞬态错误很常见）
-                let r = null;
-                for (let attempt = 1; attempt <= 3; attempt++) {
-                    r = await AIEngine.answerQuestion(q);
-                    if (r.ok) break;
-                    this.log(`中插题 AI 失败（第${attempt}次）：${(r.error || '').slice(0, 80)}`, 'e');
-                    if (attempt < 3) await new Promise(res => setTimeout(res, 3000));
-                }
-                if (!r.ok) {
-                    this.log('中插题 AI 3 次重试均失败，跳过', 'e');
+            this._midQuizState = this._midQuizState || {};
+            const rec = this._midQuizState[cacheKey] || (this._midQuizState[cacheKey] = {
+                tried: [], aiAnswer: '', aiTried: false, wrongCount: 0,
+                lastAt: 0, lastSubmitted: '', handledWrong: '', done: false,
+            });
+            if (rec.done) return;
+
+            // ---- 平台刚判错：记录这次反馈，本轮换答案 ----
+            if (st.state === 'wrong') {
+                if (rec.lastSubmitted && rec.handledWrong === rec.lastSubmitted) {
+                    // 同一次判错已经处理过（平台还没刷新）→ 等下一轮，别连续乱换
                     return;
                 }
-                answer = r.answer;
-                explain = r.explain;
-                this._aiCache = this._aiCache || {};
-                this._aiCache[cacheKey] = { answer, explain };
-                this.log('AI 答案=' + answer, 'o');
+                rec.handledWrong = rec.lastSubmitted || '';
+                rec.wrongCount++;
+                this.log(
+                    `中插题答错（第${rec.wrongCount}次${rec.lastSubmitted ? '：' + rec.lastSubmitted : ''}）→ 换下一个答案重试`,
+                    'e'
+                );
+                rec.lastAt = 0;
             }
 
-            let key = answer;
-            if (q.type === 'judge') key = (/true|对/i.test(answer)) ? 'A' : 'B';
-
-            const r2 = adapter.submitMidQuiz(q, key);
-            this.log('中插题提交结果=' + r2, 'o');
-
-            // 提交后稍等，再点「继续学习」
-            await new Promise(res => setTimeout(res, 800));
-            if (adapter.isMidQuizResolved(hit.doc)) {
-                adapter.clickMidQuizContinue(hit.doc);
-                this.log('已点「继续学习」', 'o');
+            // 刚提交、判题结果还没出来 → 等反馈，别重复点
+            if (st.state === 'pending' && rec.lastAt && Date.now() - rec.lastAt < 6000) {
+                if (this.tickCount % 4 === 1) this.log('中插题等待判题反馈…', 'i');
+                return;
             }
+
+            // ---- 首次作答：先取 AI 答案（命中缓存不重复调）----
+            if (!rec.aiTried && rec.tried.length === 0) {
+                rec.aiTried = true;
+                const cached = this._aiCache && this._aiCache[cacheKey];
+                if (cached) {
+                    rec.aiAnswer = this._normalizeMidAnswer(q, cached.answer);
+                    this.log('中插题命中缓存 → ' + (rec.aiAnswer || cached.answer), 'o');
+                } else {
+                    this.log(`中插题 [${q.type}] ${q.stem.slice(0, 50)}`, 'i');
+                    let r = null;
+                    for (let attempt = 1; attempt <= 3; attempt++) {
+                        r = await AIEngine.answerQuestion(q);
+                        if (r.ok) break;
+                        this.log(`中插题 AI 失败（第${attempt}次）：${(r.error || '').slice(0, 80)}`, 'e');
+                        if (attempt < 3) await new Promise(res => setTimeout(res, 3000));
+                    }
+                    if (this.epoch !== myEpoch) {
+                        this.log('章节已切换，中止中插题作答', 'e');
+                        return;
+                    }
+                    if (r && r.ok) {
+                        rec.aiAnswer = this._normalizeMidAnswer(q, r.answer);
+                        this._aiCache = this._aiCache || {};
+                        this._aiCache[cacheKey] = { answer: r.answer, explain: r.explain };
+                        this.log(`AI 答案=${r.answer}${rec.aiAnswer ? '（选项 ' + rec.aiAnswer + '）' : ''}`, 'o');
+                    } else {
+                        this.log('中插题 AI 3 次重试均失败 → 直接枚举选项', 'e');
+                    }
+                }
+                if (this.epoch !== myEpoch) return;
+            }
+
+            // ---- 选下一个没试过的答案 ----
+            const MAX_TRIES = 10;
+            if (rec.tried.length >= MAX_TRIES) {
+                rec.done = true;
+                this.log(`中插题已试 ${rec.tried.length} 个答案仍未答对，停止自动作答，请手动选择`, 'e');
+                this.say('中插题需要手动作答', 'err');
+                return;
+            }
+            const answer = this._pickMidAnswer(q, rec);
+            if (!answer) {
+                rec.done = true;
+                this.log('中插题已无可尝试的新答案 → 停止自动作答，请手动选择', 'e');
+                this.say('中插题需要手动作答', 'err');
+                return;
+            }
+
+            // ---- 提交 ----
+            rec.tried.push(answer);
+            rec.lastAt = Date.now();
+            rec.lastSubmitted = answer;
+            if (!adapter.clickMidQuizOption(q, answer)) {
+                this.log('中插题选项点击失败：' + answer, 'e');
+                rec.done = true;
+                return;
+            }
+            await new Promise(res => setTimeout(res, 200));
+            const submitted = adapter.clickMidQuizSubmit(doc);
+            this.log(
+                `中插题第${rec.tried.length}次作答 → ${answer}` +
+                (rec.aiAnswer && answer === rec.aiAnswer ? '（AI）' : '（枚举）'),
+                'o'
+            );
+            if (!submitted) this.log('中插题未找到提交按钮（平台可能已自动提交）', 'e');
         } catch (e) {
             this.log('中插题异常：' + e.message, 'e');
+        } finally {
+            this.midQuizBusy = false;
         }
-        setTimeout(() => { this.midQuizBusy = false; }, 2000);
+    },
+
+    /** 把 AI 答案规范成中插题选项 key（A/B/C/D…；判断题转成 A/B） */
+    _normalizeMidAnswer(q, answer) {
+        const raw = String(answer == null ? '' : answer).trim();
+        if (!raw) return '';
+        const opts = q.options || [];
+        if (q.type === 'judge') {
+            const pick = (re, fallback) => {
+                const hit = opts.find(o => re.test(String(o.text || '')));
+                return hit ? String(hit.key).toUpperCase() : fallback;
+            };
+            const firstKey = String((opts[0] || {}).key || 'A').toUpperCase();
+            const secondKey = String((opts[1] || {}).key || 'B').toUpperCase();
+            if (/true|^对$|正确|^T$/i.test(raw)) return pick(/对|正确|是/, firstKey);
+            if (/false|^错$|不正确|^F$/i.test(raw)) return pick(/错|不正确|否/, secondKey);
+            return firstKey;
+        }
+        if (q.type === 'multi') {
+            return [...new Set(raw.toUpperCase().replace(/[^A-H]/g, '').split(''))].sort().join('');
+        }
+        const m = raw.toUpperCase().match(/[A-H]/);
+        return m ? m[0] : '';
+    },
+
+    /** 生成中插题候选答案：AI 优先，其余按选项枚举（多选先单字母再双字母） */
+    _pickMidAnswer(q, rec) {
+        const tried = new Set((rec.tried || []).map(a => String(a).toUpperCase()));
+        const keys = (q.options || []).map(o => String(o.key).toUpperCase()).filter(Boolean);
+        const all = keys.length ? keys : ['A', 'B', 'C', 'D'];
+        const cands = [];
+        if (rec.aiAnswer) cands.push(rec.aiAnswer);
+        if (q.type === 'multi') {
+            const use = all.slice(0, 4);
+            for (let size = 1; size <= use.length; size++) {
+                for (const combo of this._combinations(use, size)) cands.push(combo.join(''));
+            }
+        } else {
+            cands.push(...all);
+        }
+        for (const c of cands) {
+            const k = String(c).toUpperCase();
+            if (!k || tried.has(k)) continue;
+            return k;
+        }
+        return null;
+    },
+
+    /** 组合枚举（多选候选答案用） */
+    _combinations(arr, size) {
+        const out = [];
+        const walk = (start, acc) => {
+            if (acc.length === size) { out.push(acc.slice()); return; }
+            for (let i = start; i < arr.length; i++) {
+                acc.push(arr[i]); walk(i + 1, acc); acc.pop();
+            }
+        };
+        walk(0, []);
+        return out;
     },
 
     // ---------- 章节测验 ----------
