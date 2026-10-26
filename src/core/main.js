@@ -448,59 +448,56 @@ const KezhouMain = {
 
     /**
      * 提交后等成绩页渲染，抓「标准答案/我的答案/分数」回填历史对错
-     * 每轮重新查找 quizDoc（提交后 iframe 可能重载，旧引用会失效）
-     * 轮询最多 60s，直到出现带「标准答案」的批阅记录
+     * 全文档重新搜索（提交后 iframe 重载，旧引用失效）
+     * 硬超时 45s + finally 解锁，任何情况不卡队列
      */
     scheduleAnswerVerify(histId, task) {
-        // 同步锁住队列，核对完成/超时后在 finally 解锁
         this._verifyBusy = true;
-        const maxAttempts = 20;
+        const deadline = Date.now() + 45000;
         const delayMs = 3000;
-        let attempt = 0;
         const myEpoch = this.epoch;
 
         const findGradedRecords = () => {
-            // 先试任务点内的文档，再退化为全文档搜索
-            let doc = null;
-            if (task) {
-                try { doc = window.__KEZHOU_ADAPTER__.getTaskQuizDoc(task); } catch (e) { }
-            }
-            if (!doc) {
-                try { doc = XXTQuiz._findQuizDoc(); } catch (e) { }
-            }
+            // 全文档重新搜索（不用缓存引用）
             let recs = [];
-            try { recs = XXTQuiz.extractAnsweredRecords(doc); } catch (e) { }
-            // 如果还没结果，全文档扫一遍
-            if (!recs.some(r => r.correct && r.correct.trim())) {
-                try {
-                    const adapter = window.__KEZHOU_ADAPTER__;
-                    if (adapter && adapter.collectDocs) {
-                        for (const { doc: d } of adapter.collectDocs(document)) {
-                            try {
-                                const more = XXTQuiz.extractAnsweredRecords(d);
-                                if (more.some(r => r.correct && r.correct.trim())) { recs = more; break; }
-                            } catch (e) { }
-                        }
+            try {
+                const adapter = window.__KEZHOU_ADAPTER__;
+                if (adapter && adapter.collectDocs) {
+                    for (const { doc } of adapter.collectDocs(document)) {
+                        try {
+                            const more = XXTQuiz.extractAnsweredRecords(doc);
+                            if (more.some(r => r.correct && r.correct.trim())) {
+                                recs = more;
+                                break;
+                            }
+                        } catch (e) { }
                     }
-                } catch (e) { }
-            }
+                }
+            } catch (e) { }
             return recs;
         };
 
+        const finish = (msg) => {
+            if (msg) this.log(msg, 'i');
+            this._verifyBusy = false;
+        };
+
         const tryVerify = () => {
-            // 页面已跳走 → 提前终止核对
+            // 页面已跳走 → 提前终止
             if (this.epoch !== myEpoch) {
-                this.log('页面已切换，取消判卷核对', 'i');
-                this._verifyBusy = false;
+                finish('页面已切换，取消判卷核对');
                 return;
             }
-            attempt++;
+            // 硬超时
+            if (Date.now() > deadline) {
+                finish('判卷核对硬超时（45s），跳过回填');
+                return;
+            }
             try {
                 const recs = findGradedRecords();
                 const graded = recs.filter(r => r.correct && r.correct.trim());
                 if (graded.length > 0) {
                     this.log(`成绩已出（${graded.length}/${recs.length} 题有标准答案）→ 回填对错`, 'o');
-
                     const all = KZHistory.getAll();
                     const entry = all.find(x => x.id === histId);
                     if (entry && entry.questions) {
@@ -539,21 +536,16 @@ const KezhouMain = {
                         this.log(`对错回填完成：${entry.questions.length - wrongCount}对 ${wrongCount}错`, wrongCount > 0 ? 'i' : 'o');
                         if (wrongCount > 0) this.say(`本测验 ${wrongCount} 题答错`, 'err');
                     }
-                    this._verifyBusy = false;
+                    finish();
                     return;
                 }
             } catch (e) {
                 this.log('核对异常: ' + e.message, 'e');
             }
-            if (attempt < maxAttempts) {
-                setTimeout(tryVerify, delayMs);
-            } else {
-                this.log('核对超时：成绩页未出现标准答案，跳过回填', 'i');
-                this._verifyBusy = false;
-            }
+            setTimeout(tryVerify, delayMs);
         };
 
-        setTimeout(tryVerify, 5000);  // 首次等 5s，给平台判卷时间
+        setTimeout(tryVerify, 5000);
     },
 
     // ---------- 视频 ----------
