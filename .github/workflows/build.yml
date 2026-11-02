@@ -70,11 +70,18 @@ jobs:
       - name: Build userscript
         run: node build.js
 
+      - name: Get version
+        id: ver
+        run: echo "version=$(node -p "require('fs').readFileSync('src/core/config.js','utf8').match(/VERSION:\s*'([^']+)'/)[1]")" >> "$GITHUB_OUTPUT"
+
       - name: Prepare Pages
         run: |
           mkdir -p _site
           cp dist/courseflow.user.js _site/
           cp .github/pages/index.html _site/
+          # 安装页版本号注入真实版本，避免页面与脚本版本脱节
+          sed -i "s/__VERSION__/${{ steps.ver.outputs.version }}/g" _site/index.html
+          grep -q "v${{ steps.ver.outputs.version }}" _site/index.html || { echo "版本注入失败"; exit 1; }
 
       - uses: actions/configure-pages@v5
 

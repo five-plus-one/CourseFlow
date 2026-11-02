@@ -17,6 +17,9 @@ h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; }
 .desc li::before { content: "✓"; position: absolute; left: 0; color: #287047; font-weight: 700; }
 .install-btn { display: inline-flex; align-items: center; gap: 10px; padding: 16px 40px; background: #172033; color: #fff; border: none; border-radius: 12px; font-size: 17px; font-weight: 700; cursor: pointer; text-decoration: none; transition: all .2s; box-shadow: 0 8px 24px rgba(23,32,51,0.25); }
 .install-btn:hover { background: #0f1725; transform: translateY(-2px); }
+.guide { margin-top: 14px; font-size: 13.5px; }
+.guide a { color: #2166ad; text-decoration: none; border-bottom: 1px dashed rgba(33,102,173,0.45); padding-bottom: 2px; transition: all .2s; }
+.guide a:hover { color: #0f4d8f; border-bottom-color: #0f4d8f; }
 .note { margin-top: 20px; font-size: 13px; color: #667085; line-height: 1.7; }
 .note a { color: #2166ad; text-decoration: none; }
 .steps { text-align: left; margin: 28px 0; padding: 20px 24px; background: #f7f8fa; border-radius: 12px; font-size: 13.5px; color: #4a5568; line-height: 2; }
@@ -29,7 +32,7 @@ h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; }
 <div class="card">
   <div class="logo">舟</div>
   <h1>课舟 CourseFlow</h1>
-  <div class="ver">v0.8.2 · 学习通 / 超星 自动学习助手</div>
+  <div class="ver">v__VERSION__ · 学习通 / 超星 自动学习助手</div>
 
   <div class="desc">
     <ul>
@@ -45,16 +48,20 @@ h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; }
     ⬇ 一键安装脚本
   </a>
 
+  <div class="guide">
+    <a href="https://aimarking.five-plus-one.com/guide/userscript-install" target="_blank">📖 油猴脚本安装教程 · 详细说明</a>
+  </div>
+
   <div class="steps">
     <b>安装步骤：</b><br>
-    1. 先安装 <a href="https://www.tampermonkey.net/" target="_blank"><b>Tampermonkey</b></a> 浏览器扩展<br>
+    1. 先安装 <a href="https://www.tampermonkey.net/" target="_blank"><b>Tampermonkey</b></a> 浏览器扩展（含「允许用户脚本」开关，<a href="https://aimarking.five-plus-one.com/guide/userscript-install" target="_blank">详细图文教程</a>）<br>
     2. 点击上方「一键安装脚本」按钮<br>
     3. 在 Tampermonkey 弹窗中确认安装<br>
     4. 打开学习通课程页面，点击「课舟 · 开始学习」
   </div>
 
   <div class="note">
-    已安装用户：脚本会在每次发布后<b>自动更新</b>，无需手动操作。<br>
+    已安装用户：Tampermonkey 会在新版本发布后<b>自动检测更新</b>（通常几小时内生效，也可能因浏览器缓存延迟）；急用可在 Tampermonkey 面板对本脚本点「检查更新」立即获取。<br>
     源码：<a href="https://github.com/five-plus-one/CourseFlow" target="_blank">GitHub · five-plus-one/CourseFlow</a>
   </div>
 

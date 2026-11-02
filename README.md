@@ -58,12 +58,12 @@
 
 ## 快速开始
 
-1. 安装 [Tampermonkey](https://www.tampermonkey.net/) 浏览器扩展
+1. 安装 [Tampermonkey](https://www.tampermonkey.net/) 浏览器扩展（含「允许用户脚本」开关，[详细图文教程](https://aimarking.five-plus-one.com/guide/userscript-install)）
 2. 打开[安装页面](https://five-plus-one.github.io/CourseFlow/)，点击「一键安装脚本」
 3. 在 Tampermonkey 弹窗中确认安装
 4. 打开学习通课程页面，点击「课舟 · 开始学习」
 
-> 已安装用户无需手动更新，脚本会在新版本发布后自动更新。
+> 已安装用户无需手动更新，Tampermonkey 会在新版本发布后自动检测更新（通常几小时内生效）。
 
 ## 兼容平台
 
