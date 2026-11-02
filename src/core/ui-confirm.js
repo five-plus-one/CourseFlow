@@ -240,3 +240,45 @@ function escapeHtml(s) {
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
 }
+
+// ========== 余额不足提示（对齐 AI-Marker-Suite） ==========
+// 5+1 API 余额不足时弹窗引导去钱包充值；自定义供应商只提示不给链接
+function showInsufficientBalanceDialog(isOfficial) {
+    const ID = 'kz-balance-overlay';
+    if (document.getElementById(ID)) return;                       // 已打开不叠加
+    const now = Date.now();
+    if (now < (showInsufficientBalanceDialog._until || 0)) return;  // 关闭后冷却期内不再弹
+
+    const overlay = document.createElement('div');
+    overlay.id = ID;
+    overlay.style.cssText = 'all:initial;position:fixed;inset:0;background:rgba(0,0,0,0.32);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);z-index:2147483647;display:flex;justify-content:center;align-items:center;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Inter",sans-serif;box-sizing:border-box;';
+    overlay.innerHTML = `
+        <div style="background:#fff;border:1px solid #e1e6ef;border-radius:16px;box-shadow:0 28px 80px rgba(18,28,45,0.22);width:min(420px,92vw);padding:28px;color:#172033;">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;font-size:17px;font-weight:700;">
+                <span style="font-size:20px;">⚠️</span><span>余额不足</span>
+            </div>
+            <div style="font-size:13px;color:#667085;line-height:1.7;margin-bottom:20px;">
+                ${isOfficial
+                    ? '您的 5+1 API 余额不足，无法继续 AI 答题。前往钱包页面完成充值后即可继续使用。'
+                    : '您的 API 余额不足，请前往对应平台充值后再试。'}
+            </div>
+            <div style="display:flex;gap:10px;">
+                <button id="kz-balance-close" style="flex:1;padding:11px 0;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;background:#fff;color:#344054;border:1px solid #d8dee8;">关闭</button>
+                ${isOfficial ? '<button id="kz-balance-topup" style="flex:1;padding:11px 0;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;background:#172033;color:#fff;border:none;box-shadow:0 6px 16px rgba(23,32,51,0.18);">前往钱包</button>' : ''}
+            </div>
+        </div>`;
+    (document.body || document.documentElement).appendChild(overlay);
+
+    const close = () => {
+        overlay.remove();
+        showInsufficientBalanceDialog._until = Date.now() + 5 * 60 * 1000; // 5 分钟冷却，防止自动队列反复弹
+    };
+    overlay.querySelector('#kz-balance-close').onclick = close;
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    if (isOfficial) {
+        overlay.querySelector('#kz-balance-topup').onclick = () => {
+            window.open('https://api.ai.five-plus-one.com/wallet', '_blank');
+            close();
+        };
+    }
+}

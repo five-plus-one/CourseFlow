@@ -1,6 +1,24 @@
 // ========== AI 引擎（OpenAI 兼容）v2 ==========
 // 加详细日志：请求、响应、解析结果全部留痕
 
+/**
+ * 余额不足检测：命中则弹窗引导（对齐 AI-Marker-Suite）
+ * @param {string} errorMsg 错误文案（message / code / type 拼接）
+ * @param {string} endpoint 当前接口地址
+ * @param {number} [status]  HTTP 状态码，402 直接视为余额不足
+ */
+function notifyIfInsufficientBalance(errorMsg, endpoint, status) {
+    try {
+        const text = String(errorMsg || '');
+        const isInsufficient = status === 402
+            || /insufficient|balance|quota|余额|额度|欠费/i.test(text);
+        if (!isInsufficient) return;
+        const isOfficial = /five-plus-one\.com/i.test(String(endpoint || ''));
+        KZLog.add(`AI: 检测到余额不足${isOfficial ? '（5+1 API）' : ''}，弹窗提示`, 'e');
+        showInsufficientBalanceDialog(isOfficial);
+    } catch (e) { }
+}
+
 const AIEngine = {
     getConfig() {
         try {
@@ -49,11 +67,34 @@ const AIEngine = {
                 timeout: 90000,
                 onload(res) {
                     KZLog.add(`AI HTTP ${res.status}`, res.status === 200 ? 'i' : 'e');
+                    if (res.status < 200 || res.status >= 300) {
+                        let msg = res.responseText || res.statusText || ('HTTP ' + res.status);
+                        let extra = '';
+                        try {
+                            const errObj = JSON.parse(res.responseText);
+                            if (errObj.error) {
+                                msg = errObj.error.message || JSON.stringify(errObj.error);
+                                extra = (errObj.error.code || '') + ' ' + (errObj.error.type || '');
+                            } else if (errObj.message) msg = errObj.message;
+                        } catch (e) { }
+                        if (/<html|<!doctype/i.test(String(msg))) {
+                            const tm = String(msg).match(/<title>([^<]+)<\/title>/i);
+                            msg = tm ? tm[1].trim() : ('HTTP ' + res.status);
+                        }
+                        KZLog.add(`AI 接口错误: ${String(msg).slice(0, 200)}`, 'e');
+                        notifyIfInsufficientBalance(msg + ' ' + extra, cfg.endpoint, res.status);
+                        resolve({ ok: false, error: msg });
+                        return;
+                    }
                     try {
                         const data = JSON.parse(res.responseText);
                         if (data.error) {
                             KZLog.add(`AI 接口错误: ${JSON.stringify(data.error).slice(0, 200)}`, 'e');
-                            resolve({ ok: false, error: data.error.message || JSON.stringify(data.error) });
+                            const msg = data.error.message || JSON.stringify(data.error);
+                            notifyIfInsufficientBalance(
+                                msg + ' ' + (data.error.code || '') + ' ' + (data.error.type || ''),
+                                cfg.endpoint, res.status);
+                            resolve({ ok: false, error: msg });
                             return;
                         }
                         const text = data.choices && data.choices[0] && data.choices[0].message
@@ -126,11 +167,33 @@ C. <...>
                 timeout: 120000,
                 onload(res) {
                     KZLog.add(`AI 视觉 HTTP ${res.status}`, res.status === 200 ? 'i' : 'e');
+                    if (res.status < 200 || res.status >= 300) {
+                        let msg = res.responseText || res.statusText || ('HTTP ' + res.status);
+                        let extra = '';
+                        try {
+                            const errObj = JSON.parse(res.responseText);
+                            if (errObj.error) {
+                                msg = errObj.error.message || JSON.stringify(errObj.error);
+                                extra = (errObj.error.code || '') + ' ' + (errObj.error.type || '');
+                            } else if (errObj.message) msg = errObj.message;
+                        } catch (e) { }
+                        if (/<html|<!doctype/i.test(String(msg))) {
+                            const tm = String(msg).match(/<title>([^<]+)<\/title>/i);
+                            msg = tm ? tm[1].trim() : ('HTTP ' + res.status);
+                        }
+                        KZLog.add(`AI 视觉错误: ${String(msg).slice(0, 150)}`, 'e');
+                        notifyIfInsufficientBalance(msg + ' ' + extra, cfg.endpoint, res.status);
+                        resolve({ ok: false, error: msg });
+                        return;
+                    }
                     try {
                         const data = JSON.parse(res.responseText);
                         if (data.error) {
                             const msg = data.error.message || JSON.stringify(data.error);
                             KZLog.add(`AI 视觉错误: ${msg.slice(0, 150)}`, 'e');
+                            notifyIfInsufficientBalance(
+                                msg + ' ' + (data.error.code || '') + ' ' + (data.error.type || ''),
+                                cfg.endpoint, res.status);
                             resolve({ ok: false, error: msg });
                             return;
                         }
