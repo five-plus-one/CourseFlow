@@ -80,14 +80,27 @@ const XuexitongAdapter = {
 
     // ---------- 页面识别 ----------
 
-    /** 当前激活的 Tab：video | quiz | unknown */
+    /**
+     * 当前激活的知识点 Tab 类型：video | quiz | other | unknown
+     *
+     * 【不要按位置判断】旧实现写死「#dct2 = 测验 Tab」，只在「一视频一测验」两卡老页成立。
+     * 实测多任务点/学习目标页里 #dct2 是「2视频」，测验在 #dct3：
+     *   #dct1「1学习目标」 / #dct2「2视频」 / #dct3「3章节测验」
+     * 按位置判断会让视频页被当成测验页 → 一直解析不到题目、视频永远不播。
+     * 这里按 Tab 文案判断，文案缺失时交给调用方看 DOM。
+     */
     getActiveTab() {
         try {
-            const t1 = document.querySelector('#dct1');
-            const t2 = document.querySelector('#dct2');
-            if (t2 && t2.classList.contains('active')) return 'quiz';
-            if (t1 && t1.classList.contains('active')) return 'video';
-            // 兜底：看 iframe title
+            const tabIds = XXT_SELECTORS.KNOWLEDGE_TABS || ['#dct1', '#dct2', '#dct3', '#dct4'];
+            for (const sel of tabIds) {
+                const el = document.querySelector(sel);
+                if (!el || !el.classList.contains('active')) continue;
+                const label = (el.textContent || '').replace(/\s+/g, '');
+                if (/测验|作业|考试|习题/.test(label)) return 'quiz';
+                if (/视频/.test(label)) return 'video';
+                if (label) return 'other';
+            }
+            // 兜底：看卡片 iframe 的 title
             const f = document.querySelector('iframe#iframe');
             if (f) {
                 try {
@@ -379,6 +392,15 @@ const XuexitongAdapter = {
             } catch (e) { }
         });
         return out;
+    },
+
+    /** 当前 active Tab 之后是否还有未激活的知识点 Tab（位置不代表类型，只用来判断能不能往后走） */
+    hasNextKnowledgeTab() {
+        const tabs = this.listKnowledgeTabs();
+        if (tabs.length < 2) return false;
+        const activeIdx = tabs.findIndex(t => t.active);
+        if (activeIdx >= 0) return tabs.slice(activeIdx + 1).some(t => !t.active);
+        return tabs.some(t => !t.active);
     },
 
     /** 切到「当前 Tab 之后」的下一个知识点 Tab；没有则返回 false */
