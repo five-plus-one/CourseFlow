@@ -410,6 +410,54 @@ const KezhouMain = {
         }
     },
 
+    /**
+     * 当前 Tab 的内容（视频/测验）处理完后，往后切到下一个知识点 Tab。
+     *
+     * 旧逻辑默认「第二个 Tab 就是章节测验」，直接 adapter.switchTab('quiz') 点 #dct2。
+     * 但实测发现同一门课里 Tab 结构并不固定（docs/xuexitong-research.md）：
+     *   普通章节：  #dct1 视频        #dct2 章节测验/作业
+     *   学习目标页：#dct1 学习目标    #dct2 视频    #dct3 章节测验
+     * 后一种里 #dct2 是视频，旧逻辑反复点自己的 Tab，测验永远不答、还可能把视频重播。
+     * 所以这里改成「按 Tab 顺序往后走一格，内容是什么下一轮 tick 自然会重新识别」。
+     *
+     * @returns {boolean} true = 已切走，调用方必须立即 return
+     */
+    advanceKnowledgeTab(adapter, reason) {
+        let tabs = [];
+        try { tabs = adapter.listKnowledgeTabs() || []; } catch (e) { tabs = []; }
+        const maxSteps = Math.max(0, tabs.length - 1);
+        if (maxSteps === 0) return false;
+        if (this._knowledgeStep >= maxSteps) return false;
+        // 位置不代表类型，只判断「后面还有没有没激活的 Tab」，具体内容下一轮 tick 重新识别
+        let hasNext = false;
+        try { hasNext = !!adapter.hasNextKnowledgeTab(); } catch (e) { hasNext = false; }
+        if (!hasNext) return false;
+
+        // 新 Tab 是全新的内容：清掉上一个 Tab 的完成态 / 去重键 / 熔断标记
+        this._knowledgeStep++;
+        this.taskLocalDone = {};
+        this.currentTask = null;
+        this._seekedFor = null;
+        this.lastRatio = 0;
+        this.videoDone = false;
+        this.quizDone = false;
+        this.lastQuizKey = '';
+        this._emptyTicks = 0;
+        this._quizSwitchTries = 0;
+        this.epoch++;
+        // 新内容加载期间别再触发「纯文本页自动跳过」，否则会被连跳两格
+        this._queueModeUntil = Date.now() + 3000;
+
+        const ok = adapter.nextKnowledgeTab();
+        this.log(
+            ok ? `切到下一知识点 Tab（${reason}，step=${this._knowledgeStep}/${maxSteps}）`
+               : '知识点 Tab 切换失败',
+            ok ? 'o' : 'e'
+        );
+        if (ok) this.say('进入下一知识点', 'info');
+        return !!ok;
+    },
+
     async onAllTasksDone(adapter) {
         // 发帖/核对进行中：等完成再继续（切知识点/跳节）
         if (this._discussBusy) {
@@ -633,7 +681,11 @@ const KezhouMain = {
                 return;
             }
 
-            // legacy：尝试切测验 Tab，最多 2 次，切不到就当无测验直接推进
+            // legacy：当前 Tab 的视频处理完 → 先往后切一格知识点 Tab。
+            // 下一个 Tab 可能是视频 / 章节测验 / 作业 / 图文，不能默认是「章节测验」。
+            if (this.advanceKnowledgeTab(adapter, '视频完成')) return;
+
+            // 没有下一个知识点 Tab → 退回旧的两卡结构（#dct1 视频 / #dct2 测验）
             if (!this.quizDone) {
                 this._quizSwitchTries = (this._quizSwitchTries || 0) + 1;
                 if (this._quizSwitchTries <= 2) {
@@ -729,6 +781,8 @@ const KezhouMain = {
                 return;
             }
             if (a) {
+                // 先往后走一格知识点 Tab：下一个可能是视频/测验/作业，不能默认是章节测验
+                if (this.advanceKnowledgeTab(a, 'video ended')) return;
                 if (!this.quizDone) {
                     a.switchTab('quiz');
                     this.log('已点「章节测验」Tab', 'o');
@@ -1033,6 +1087,11 @@ const KezhouMain = {
                 this.quizBusy = false;
                 return;
             }
+            // legacy：本 Tab 处理完 → 先往后走一格知识点 Tab 再考虑下一节
+            if (this.advanceKnowledgeTab(adapter, '测验已作答')) {
+                this.quizBusy = false;
+                return;
+            }
             if (this.options.autoNext) {
                 await new Promise(r => setTimeout(r, 1200));
                 if (this.running) {
@@ -1289,6 +1348,9 @@ const KezhouMain = {
                 this.markTaskDone(task, 'submitted');
                 return;
             }
+
+            // legacy：还有下一个知识点 Tab 就先往后走（内容可能是视频/测验/文档）
+            if (this.advanceKnowledgeTab(adapter, '测验完成')) return;
 
             // legacy：进入下一节
             if (this.options.autoNext) {
