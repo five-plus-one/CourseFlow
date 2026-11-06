@@ -501,10 +501,36 @@ function createKezhouPanel() {
     panel.querySelector('#kz-clear-log').onclick = () => { KZLog.clear(); kzToast('日志已清空', 'info'); };
 
     panel.querySelector('#kz-test-ai').onclick = async () => {
-        kzToast('正在测试 AI…');
-        const r = await AIEngine.chat('回复两个字：正常', '你是一个测试助手。');
-        if (r.ok) kzToast('AI 连接成功：' + r.text.slice(0, 30), 'success');
-        else kzToast('AI 连接失败：' + r.error, 'error');
+        // 用「输入框里当前的内容」测试，而不是上次保存的配置。
+        // 旧实现只读已保存配置：用户粘贴新 Key 后直接点「测试 AI」，测的还是旧 Key，
+        // 看起来就像"设置保存不进去"。这里对输入值做一次临时覆盖（不落盘）。
+        let saved = {};
+        try { saved = ProviderManager.getActiveConfig() || {}; } catch (e) { }
+
+        const typedKey = (panel.querySelector('#kz-apikey').value || '').trim();
+        const typedEndpoint = (panel.querySelector('#kz-endpoint').value || '').trim();
+        const modelSel = panel.querySelector('#kz-model');
+        const typedModel = modelSel
+            ? (modelSel.value === '__custom__'
+                ? (panel.querySelector('#kz-model-custom').value || '').trim()
+                : modelSel.value)
+            : '';
+
+        const cfgOverride = {
+            apiKey: typedKey || saved.apiKey || '',
+            endpoint: typedEndpoint || saved.endpoint || SCRIPT_CONFIG.DEFAULT_ENDPOINT,
+            model: typedModel || saved.model || SCRIPT_CONFIG.DEFAULT_MODEL,
+        };
+        const usingTypedKey = !!typedKey && typedKey !== (saved.apiKey || '');
+
+        kzToast(usingTypedKey ? '正在测试输入框里的 Key…' : '正在测试 AI…');
+        const r = await AIEngine.chat('回复两个字：正常', '你是一个测试助手。', cfgOverride);
+        if (r.ok) {
+            kzToast('AI 连接成功：' + r.text.slice(0, 30) +
+                (usingTypedKey ? '（未保存，记得点「保存」）' : ''), 'success');
+        } else {
+            kzToast('AI 连接失败：' + r.error + (usingTypedKey ? '（测试的是输入框内容）' : ''), 'error');
+        }
     };
 
     panel.querySelector('#kz-save').onclick = () => {

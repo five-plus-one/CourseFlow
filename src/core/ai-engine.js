@@ -39,8 +39,14 @@ const AIEngine = {
         if (cfg.model !== undefined) ProviderManager.setActive(name, cfg.model);
     },
 
-    chat(userPrompt, systemPrompt = '你是网课答题助手，直接给出正确答案。') {
-        const cfg = this.getConfig();
+    /**
+     * @param {string} userPrompt
+     * @param {string} [systemPrompt]
+     * @param {{endpoint?:string, apiKey?:string, model?:string}} [cfgOverride]
+     *        临时覆盖配置（只影响这一次请求，不落盘）。用于「测试 AI」按输入框内容试连。
+     */
+    chat(userPrompt, systemPrompt = '你是网课答题助手，直接给出正确答案。', cfgOverride = null) {
+        const cfg = Object.assign({}, this.getConfig(), cfgOverride || {});
         if (!cfg.apiKey) {
             KZLog.add('AI: 未配置 API Key', 'e');
             return Promise.resolve({ ok: false, error: '未配置 API Key' });
