@@ -2,6 +2,7 @@
 
 > 数据来源：`kezhou-deep-muh15fbo/156oj.txt`、`kezhou-net-muh16zkk.txt`、`kezhou-studentstudyAjax.html`
 > 多任务点补测：`kezhou-tasks-mus0tvhw.txt`、`kezhou-tasks-mus0ui44.txt`（2026-10-03）
+> 知识点 Tab 补测：三卡页 / 学习目标页真课实测（2026-11，chapterId=1243917384），已随 v0.8.11 修复
 
 ## 一、完整 iframe 地图（已实测）
 
@@ -85,6 +86,35 @@ MAIN  studentstudy
 3. **jobid 在 iframe 属性上**：video 是纯数字（`1560842944387137`），work 带前缀（`work-<hex>`）
 4. **`#dct1/#dct2` 在这类页是知识点 Tab**（"1知识点1"/"2知识点2"），旧代码 `switchTab('quiz')` 点 `#dct2` 语义是错的
 5. 旧版一页一视频一测验（`#dct1`「视频」/`#dct2`「章节测验」）继续走 legacy 路径
+
+## 一c、知识点 Tab 结构（学习目标 / 视频 / 测验三卡，已实测 2026-11）
+
+**同一门课里 Tab 结构不固定，位置不代表类型**：
+
+| 页面形态 | Tab 结构 | 说明 |
+|---|---|---|
+| 老两卡页 | `#dct1`「视频」 / `#dct2`「章节测验」 | legacy 路径 |
+| 学习目标页（三卡） | `#dct1`「1学习目标」 / `#dct2`「2视频」 / `#dct3`「3章节测验」 | `#dct2` 是视频，不是测验 |
+| 多任务点页 | `#dct1`「1知识点1」 / `#dct2`「2知识点2」 … | 走队列路径（见一b） |
+
+**判定规则（v0.8.11 起）**：
+
+1. 不按位置判断 video / quiz。`getActiveTab()` 按 **Tab 文案**识别：
+   - 文案含「测验 / 作业 / 考试 / 习题」→ `quiz`
+   - 含「视频」→ `video`
+   - 其它非空文案（学习目标、知识点）→ `other`
+   - 文案缺失 → 退回卡片 `iframe#iframe` 的 title
+2. 一个 Tab 的内容处理完（视频播完 / 测验答完）后，**按顺序往后切一格**知识点 Tab（`advanceKnowledgeTab`），下一轮 tick 再按内容重新识别，不预设「下一个 Tab 就是测验」。
+3. 切换后清理上一个 Tab 的完成态（`taskLocalDone` / `videoDone` / `quizDone` / `lastQuizKey` / `_emptyTicks`），并设 3 秒冷却，防止新内容加载期间被「纯文本页自动跳过」连跳两格；用 `_knowledgeStep` 限制最多切 Tab 数−1 次，防死循环。
+4. 只有没有下一个 Tab 时，才退回旧逻辑（点 `#dct2` 当测验 / `autoNext` 下一节）。
+
+**曾经必修的 bug**：旧代码把 `#dct2` 写死成「测验 Tab」。在三卡页里 `#dct2` 是视频：
+- 视频页被当成测验页 → `handleQuiz` 每轮解析 0 题，视频永远不播
+- 视频播完又 `switchTab('quiz')` 点回 `#dct2`（自己），真正的 `#dct3` 测验永远轮不到，还可能触发卡片重载
+
+修复前后真课日志对照（chapterId=1243917384）：
+- 修复前：`tick#N video=false quiz=true tab=quiz` 反复出现，视频进度 0% 不动
+- 修复后：学习目标 → 视频（含中插题枚举作答）播到 100% → `video ended` → 自动切到测验 Tab → 识别出 `work` 任务点
 
 ## 二、视频任务点规则（页面原文）
 
@@ -299,3 +329,4 @@ GET /mooc-ans/multimedia/log/a/<userid>/<token>
 3. **题面**：读 `#frame_content` 的 `textContent`；作答页若乱码再做字体映射
 4. **进度**：`.ans-job-finished` / `validatejobcount` / 章节树
 5. **风险控制**：识别「今日上限」「验证码」弹窗，停下来交给用户，不硬闯
+6. **Tab 处理**：按文案识别当前 Tab 类型（video/quiz/other），处理完按顺序往后切一格知识点 Tab；不把 `#dct2` 写死成测验（见一c）
