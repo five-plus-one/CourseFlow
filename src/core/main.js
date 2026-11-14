@@ -201,6 +201,10 @@ const KezhouMain = {
             this._knowledgeStep = 0;
             this._quizSwitchTries = 0;
             this._verifyBusy = false;
+            // 队列冷却不能跨章节继承：上一章作业任务点会把冷却推到 60 秒后，
+            // 不重置的话新章节开头会一直空转、日志刷「等待任务点加载…」
+            this._queueModeUntil = 0;
+            this._quizFailStreak = 0;
             this.unbindVideo();
         } else if (p.chapterId && this.lastChapterId && p.chapterId !== this.lastChapterId) {
             this.log(`章节变化: ${this.lastChapterId} → ${p.chapterId}，熔断旧任务`, 'i');
@@ -219,6 +223,8 @@ const KezhouMain = {
             this._knowledgeStep = 0;
             this._quizSwitchTries = 0;
             this._verifyBusy = false;
+            this._queueModeUntil = 0;
+            this._quizFailStreak = 0;
             this.unbindVideo();
         }
 
@@ -270,7 +276,8 @@ const KezhouMain = {
         try { tasks = adapter.listTasks(); } catch (e) { tasks = []; }
         const queueMode = tasks.length >= 2 || (tasks.length === 1 && tasks[0].type === 'work');
         if (queueMode) {
-            this._queueModeUntil = Date.now() + 60000;
+            // 冷却只用于「刚切完 Tab、内容还没挂载」的一小段时间，60 秒太长会把下一段内容拖死
+            this._queueModeUntil = Date.now() + 15000;
             await this.tickTaskQueue(adapter, tasks);
             return;
         }
@@ -489,6 +496,7 @@ const KezhouMain = {
             this.currentTask = null;
             this._seekedFor = null;
             this.lastRatio = 0;
+            this._queueModeUntil = Date.now() + 3000;   // 新 Tab 加载期，别被"纯文本页"误判
             const ok = adapter.nextKnowledgeTab();
             this.log(ok ? `切换到下一知识点 Tab（step=${this._knowledgeStep}/${maxSteps}）` : '知识点 Tab 切换失败', ok ? 'o' : 'e');
             if (ok) this.say('进入下一知识点', 'info');
@@ -521,7 +529,8 @@ const KezhouMain = {
      */
     scheduleAnswerVerify(histId, task) {
         this._verifyBusy = true;
-        const deadline = Date.now() + 45000;
+        // 45s 太长：核对只是"锦上添花"的回填，不该把「下一节」挡住这么久
+        const deadline = Date.now() + 15000;
         const delayMs = 3000;
         const myEpoch = this.epoch;
 
@@ -904,13 +913,14 @@ const KezhouMain = {
                         this.log(`中插题 [${q.type}] ${q.stem.slice(0, 50)}`, 'i');
                         let r = null;
                         for (let attempt = 1; attempt <= 3; attempt++) {
+                            if (!this.running || this.epoch !== myEpoch) break;
                             r = await AIEngine.answerQuestion(q);
                             if (r.ok) break;
                             this.log(`中插题 AI 失败（第${attempt}次）：${(r.error || '').slice(0, 80)}`, 'e');
                             if (attempt < 3) await new Promise(res => setTimeout(res, 3000));
                         }
-                        if (this.epoch !== myEpoch) {
-                            this.log('章节已切换，中止中插题作答', 'e');
+                        if (!this.running || this.epoch !== myEpoch) {
+                            this.log('已暂停/章节已切换，中止中插题作答', 'e');
                             return;
                         }
                         if (r && r.ok) {
@@ -1169,10 +1179,17 @@ const KezhouMain = {
                             this.log('  截图完成，发送视觉模型…', 'i');
                             let vr = null;
                             for (let attempt = 1; attempt <= 3; attempt++) {
+                                // 暂停/切页要在两次重试之间立刻生效，否则"暂停"要等 90s 超时才响应
+                                if (!this.running || this.epoch !== myEpoch) break;
                                 vr = await AIEngine.answerWithVision(screenshot);
                                 if (vr.ok) break;
                                 this.log(`  视觉失败(${(vr.error || '').slice(0, 40)}) 第${attempt}次重试`, 'e');
                                 if (attempt < 3) await new Promise(res => setTimeout(res, 2000));
+                            }
+                            if (!this.running || this.epoch !== myEpoch) {
+                                this.log('已暂停/页面已切换，终止本次测验作答', 'i');
+                                this.quizBusy = false;
+                                return;
                             }
                             if (vr && vr.ok) {
                                 r = vr;
@@ -1197,6 +1214,11 @@ const KezhouMain = {
                         r = { ok: true, answer: c.answer, explain: c.explain, reason: '(cached)' };
                         this.log('  命中缓存 → ' + c.answer, 'o');
                     } else {
+                        if (!this.running || this.epoch !== myEpoch) {
+                            this.log('已暂停/页面已切换，终止本次测验作答', 'i');
+                            this.quizBusy = false;
+                            return;
+                        }
                         r = await AIEngine.answerQuestion(q);
                         if (r.ok && r.answer) {
                             this._aiCache = this._aiCache || {};
@@ -1248,9 +1270,21 @@ const KezhouMain = {
                 kzToast(`有 ${qs.length - results.length} 题未答上，不提交`, 'error');
                 this.quizBusy = false;
                 this.quizDone = false;
+                // AI 连续失败（典型是 503 无可用渠道 / key 失效）时不要每 2.5 秒无限重试，
+                // 熔断后停在那里，把控制权交还给用户
+                this._quizFailStreak = (this._quizFailStreak || 0) + 1;
+                if (this._quizFailStreak >= 2) {
+                    this._quizFailStreak = 0;
+                    this.log(`连续 ${2} 次未能答完本题 → 自动暂停（请检查模型 / 渠道 / API Key）`, 'e');
+                    kzToast('AI 连续失败，已自动暂停，请检查模型或渠道', 'error');
+                    setFabState('paused', '课舟 · 已暂停');
+                    this.stop('AI 连续失败');
+                    return;
+                }
                 setFabState('running', '课舟 · 进行中');
                 return;
             }
+            this._quizFailStreak = 0;
             if (this.epoch !== myEpoch) {
                 this.log('章节已切换，取消确认框', 'e');
                 this.quizBusy = false;
@@ -1278,6 +1312,15 @@ const KezhouMain = {
                 });
             });
             this.modalOpen = false;
+
+            // 倒计时期间用户可能点了暂停：此时绝不能再提交
+            if (!this.running) {
+                this.log('已暂停，取消提交', 'e');
+                this.quizDone = false;
+                this.quizBusy = false;
+                setFabState('paused', '课舟 · 已暂停');
+                return;
+            }
 
             if (action !== 'submit') {
                 this.quizDone = false;
